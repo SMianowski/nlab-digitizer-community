@@ -530,3 +530,56 @@ def test_full_configuration_roundtrips_through_async_capture_before_first_read(t
         assert metadata["configuration_snapshot"] == "before acquisition"
         assert "configuration_yaml" not in metadata
     assert list(read_sum_capture(path)) == [decode_sum_packet(packet())]
+
+
+def test_vectorised_analysis_matches_per_window_reference_across_wrap():
+    # The original ScopeSumAnalysis.append looped over (timestamp, sum)
+    # records; recompute that model and compare exactly, across a u64 wrap.
+    packets = [
+        decode_sum_packet(packet(first=(MASK64 - 508 * 7 + 3 + i * 508 * 7) & MASK64,
+                                 sequence=i, total=16 * (32768 + 13 * i)))
+        for i in range(3)
+    ]
+    analysis = ScopeSumAnalysis()
+    for item in packets:
+        analysis.append(item)
+
+    points, last, elapsed, signed = [], None, 0, 0
+    for item in packets:
+        for timestamp, total in item.records:
+            if last is not None:
+                elapsed += (timestamp - last) & MASK64
+            last = timestamp
+            points.append((elapsed * 8e-9, total / 16 - 32768.0))
+            signed += total - 16 * 32768
+    snapshot = analysis.snapshot()
+    assert list(snapshot["points"]) == points[-8192:]
+    assert snapshot["signed_sum"] == signed
+    assert snapshot["windows"] == 3 * 508 and snapshot["skipped"] == 0
+    assert packets[1].records[0][0] < packets[0].records[0][0]  # the wrap happened
+
+
+def _stream(count, first=10, start_sequence=0):
+    return [
+        packet(first=(first + i * 508 * 7) & MASK64, sequence=(start_sequence + i) & 0xFFFFFFFF,
+               total=16 * (32768 + i), missed=i // 3, stopped=i == count - 1)
+        for i in range(count)
+    ]
+
+
+def test_batch_analysis_equals_per_packet_analysis_and_keeps_error_prefix():
+    packets = [decode_sum_packet(raw) for raw in _stream(30)]
+    reference, batched = ScopeSumAnalysis(), ScopeSumAnalysis()
+    for item in packets:
+        reference.append(item)
+    batched.append_many(packets[:7])
+    batched.append_many(packets[7:])
+    assert batched.snapshot() == reference.snapshot()
+
+    gap = [decode_sum_packet(raw) for raw in _stream(5)]
+    broken = gap[:3] + [gap[4]]  # sequence discontinuity at the fourth packet
+    analysis = ScopeSumAnalysis()
+    with pytest.raises(ValueError, match="sequence discontinuity"):
+        analysis.append_many(broken)
+    assert analysis.packet_count == 3
+    assert analysis.window_count == 3 * 508

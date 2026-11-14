@@ -102,10 +102,9 @@ def _json_attribute(source: h5py.File, name: str) -> dict[str, Any]:
 def _packet(source: h5py.File, index: int, offsets: npt.NDArray[np.uint64]) -> ScopeSumPacket:
     packet = decode_sum_packet(source["packets"][index].tobytes())
     start, end = int(offsets[index]), int(offsets[index + 1])
-    if end - start != len(packet.records):
+    if end - start != packet.timestamps.size:
         raise ValueError("Stored valid_count differs from raw packet")
-    for col, name in enumerate(("timestamps", "sums")):
-        expected = np.asarray([r[col] for r in packet.records], dtype="<u8")
+    for name, expected in (("timestamps", packet.timestamps), ("sums", packet.sums)):
         if not np.array_equal(source[name][start:end], expected):
             raise ValueError(f"Stored {name} differs from raw packet")
     return packet
@@ -160,8 +159,8 @@ def read_current_capture_info(
                 geometry.gap_cycles,
             ):
                 raise ValueError("Sum geometry changed during acquisition")
-            first_stamp = first.records[0][0]
-            duration_ticks = (last.records[-1][0] - first_stamp) & MASK64
+            first_stamp = int(first.timestamps[0])
+            duration_ticks = (int(last.timestamps[-1]) - first_stamp) & MASK64
             if duration_ticks >= 1 << 63:
                 raise ValueError("Nonmonotonic or ambiguous capture timestamp span")
             duration_ticks += geometry.frame_samples // 4
@@ -229,9 +228,9 @@ def _blocks(
             packet = decode_sum_packet(row.tobytes(), info.geometry)
             continuity.append(packet)
             begin, end = int(info.offsets[j]), int(info.offsets[j + 1])
-            if end - begin != len(packet.records):
+            if end - begin != packet.timestamps.size:
                 raise ValueError("Stored valid_count differs from raw packet")
-            data = np.asarray(packet.records, dtype=np.uint64)
+            data = np.column_stack((packet.timestamps, packet.sums))
             for col, name in enumerate(("timestamps", "sums")):
                 if not np.array_equal(source[name][begin:end], data[:, col]):
                     raise ValueError(f"Stored {name} differs from raw packet")

@@ -6,6 +6,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -273,41 +274,83 @@ class ScopeCurrentAccumulator:
         received_ns: int,
     ) -> None:
         """Validate and reduce one complete immutable transport frame."""
-        if len(record) != geometry.frame_bytes:
-            self.note_rejected_frame()
-            raise ValueError(
-                f"Scope current frame has {len(record)} bytes, expected {geometry.frame_bytes}"
-            )
-        if geometry.padding_bytes and any(record[-geometry.padding_bytes :]):
-            self.note_rejected_frame()
-            raise ValueError("Scope current frame has nonzero alignment padding")
+        self.append_frames((record,), geometry, (received_ns,))
+
+    def append_frames(
+        self,
+        records: Sequence[bytes],
+        geometry: ScopeDmaGeometry,
+        received_ns: Sequence[int],
+    ) -> None:
+        """Validate and reduce complete transport frames in arrival order.
+
+        Equivalent to append_frame() for each record in turn, but one numpy
+        pass per batch: the reader process forwards frames in batches, and
+        per-frame Python work here limited Current DMA to ~5200 frames/s next
+        to a busy GUI thread. Frames before the first invalid one are
+        analysed; that one is counted as rejected and raises ValueError.
+        """
+        count = len(records)
+        if count != len(received_ns):
+            raise ValueError("each Scope current frame needs one receive time")
+        if count == 0:
+            return
+        frame_bytes = geometry.frame_bytes
+        valid = count
+        for index, record in enumerate(records):
+            if len(record) != frame_bytes:
+                valid = index
+                break
+        block = np.frombuffer(b"".join(records[:valid]), dtype=np.uint8).reshape(valid, frame_bytes)
+        if geometry.padding_bytes and valid:
+            padded = np.flatnonzero(block[:, frame_bytes - geometry.padding_bytes :].any(axis=1))
+            if padded.size:
+                valid = int(padded[0])
         if geometry.waveform_samples <= 0:
+            valid = 0
+        if valid:
+            self._reduce_frames(records[:valid], block[:valid], geometry, received_ns[:valid])
+        if valid < count:
             self.note_rejected_frame()
+            record = records[valid]
+            if len(record) != frame_bytes:
+                raise ValueError(
+                    f"Scope current frame has {len(record)} bytes, expected {frame_bytes}"
+                )
+            if geometry.padding_bytes and any(record[-geometry.padding_bytes :]):
+                raise ValueError("Scope current frame has nonzero alignment padding")
             raise ValueError("Scope current frame has no waveform samples")
 
+    def _reduce_frames(
+        self,
+        records: Sequence[bytes],
+        block: np.ndarray,
+        geometry: ScopeDmaGeometry,
+        received_ns: Sequence[int],
+    ) -> None:
+        count = len(records)
         # Reconcile transport independently of analysis. A snapshot taken
-        # during the reduction may briefly show one more received than
-        # analyzed frame, but a GUI stall cannot alter either total.
+        # during the reduction may briefly show more received than analyzed
+        # frames, but a GUI stall cannot alter either total.
         with self._lock:
             if not self._active or self._geometry != geometry:
-                self._discarded_analysis_frames += 1
+                self._discarded_analysis_frames += count
                 raise RuntimeError("Scope current frame arrived outside its analysis session")
             session_id = self._session_id
-            self._received_frames += 1
-            self._received_bytes += len(record)
+            self._received_frames += count
+            self._received_bytes += count * geometry.frame_bytes
 
-        timestamp = int.from_bytes(record[:8], "little")
-        values = np.frombuffer(
-            record,
-            dtype="<i2",
-            count=geometry.waveform_samples,
-            offset=8,
+        stamps = np.ascontiguousarray(block[:, :8]).view("<u8").reshape(count)
+        # int64 arithmetic is exact below 2**62 ticks (~1170 years at 8 ns);
+        # object arrays keep Python-int semantics for anything larger.
+        timestamps = (
+            stamps.astype(np.int64) if int(stamps.max()) < 1 << 62
+            else np.array([int(value) for value in stamps], dtype=object)
         )
-        raw_sum = int(values.sum(dtype=np.int64))
-        sample_count = int(values.size)
-        latest_raw_sample = int(values[-1])
-        frame_minimum = int(values.min())
-        frame_maximum = int(values.max())
+        values = block[:, 8 : 8 + 2 * geometry.waveform_samples].view("<i2")
+        sums = values.sum(axis=1, dtype=np.int64)
+        samples_per_frame = geometry.waveform_samples
+        last = count - 1
 
         with self._lock:
             if (
@@ -315,79 +358,105 @@ class ScopeCurrentAccumulator:
                 or self._session_id != session_id
                 or self._geometry != geometry
             ):
-                self._discarded_analysis_frames += 1
+                self._discarded_analysis_frames += count
                 raise RuntimeError("Scope current session ended during frame analysis")
             previous = self._previous_timestamp
-            if previous is not None:
-                delta = timestamp - previous
-                self._interval_ticks.append(delta)
+            deltas = (
+                np.diff(timestamps, prepend=previous) if previous is not None
+                else np.diff(timestamps)
+            )
+            if deltas.size:
+                self._interval_ticks.extend(deltas.tolist())
                 expected = self._runtime.expected_interval_ticks if self._runtime else 0
-                if delta <= 0 or not expected or delta % expected:
-                    self._off_grid_intervals += 1
+                if expected:
+                    off_grid = (deltas <= 0) | (deltas % expected != 0)
+                    on_grid = deltas[~off_grid]
+                    self._off_grid_intervals += int(np.count_nonzero(off_grid))
+                    if on_grid.size:
+                        self._skipped_opportunities += int((on_grid // expected - 1).sum())
                 else:
-                    self._skipped_opportunities += max(0, delta // expected - 1)
-            self._previous_timestamp = timestamp
+                    self._off_grid_intervals += int(deltas.size)
+            self._previous_timestamp = int(timestamps[last])
 
             if self._origin_timestamp is None:
-                self._origin_timestamp = timestamp
-            bin_index = (timestamp - self._origin_timestamp) // self._bin_ticks
-            current = self._current_bin
-            if current is None or current.index != bin_index:
-                if current is not None:
-                    self._bins.append(current.freeze())
-                current = _ScopeCurrentBinBuilder(
-                    index=bin_index,
-                    first_timestamp=timestamp,
-                    last_timestamp=timestamp,
-                    first_received_ns=received_ns,
-                    last_received_ns=received_ns,
-                )
-                self._current_bin = current
-                while len(self._bins) > self._maximum_bins:
-                    self._bins.popleft()
+                self._origin_timestamp = int(timestamps[0])
+            bin_indices = (timestamps - self._origin_timestamp) // self._bin_ticks
+            starts = [0, *(np.flatnonzero(bin_indices[1:] != bin_indices[:-1]) + 1).tolist()]
+            run_sums = np.add.reduceat(sums, starts).tolist()
+            ends = [*starts[1:], count]
+            for start, end, run_sum in zip(starts, ends, run_sums, strict=True):
+                frames = end - start
+                bin_index = int(bin_indices[start])
+                current = self._current_bin
+                if current is None or current.index != bin_index:
+                    if current is not None:
+                        self._bins.append(current.freeze())
+                    current = _ScopeCurrentBinBuilder(
+                        index=bin_index,
+                        first_timestamp=int(timestamps[start]),
+                        last_timestamp=int(timestamps[start]),
+                        first_received_ns=int(received_ns[start]),
+                        last_received_ns=int(received_ns[start]),
+                    )
+                    self._current_bin = current
+                    while len(self._bins) > self._maximum_bins:
+                        self._bins.popleft()
+                current.last_timestamp = int(timestamps[end - 1])
+                current.last_received_ns = int(received_ns[end - 1])
+                current.raw_sum += run_sum
+                current.sample_count += samples_per_frame * frames
+                current.frame_count += frames
+                current.payload_bytes += geometry.frame_bytes * frames
+                current.coverage_ns += geometry.capture_duration_ns * frames
 
-            current.last_timestamp = timestamp
-            current.last_received_ns = received_ns
-            current.raw_sum += raw_sum
-            current.sample_count += sample_count
-            current.frame_count += 1
-            current.payload_bytes += len(record)
-            current.coverage_ns += geometry.capture_duration_ns
-            self._analyzed_frames += 1
-            self._analyzed_raw_sum += raw_sum
-            self._analyzed_sample_count += sample_count
-            self._latest_raw_sample = latest_raw_sample
-            self._latest_frame_minimum = frame_minimum
-            self._latest_frame_maximum = frame_maximum
-            self._latest_timestamp = timestamp
-            self._latest_received_ns = received_ns
-            self._waveform_records.append(record)
-            waveform_cutoff = timestamp - self._waveform_history_ticks
-            while (
-                self._waveform_records
-                and int.from_bytes(self._waveform_records[0][:8], "little")
-                < waveform_cutoff
-            ):
-                self._waveform_records.popleft()
+            batch_sum = int(sums.sum())
+            self._analyzed_frames += count
+            self._analyzed_raw_sum += batch_sum
+            self._analyzed_sample_count += samples_per_frame * count
+            last_values = values[last]
+            self._latest_raw_sample = int(last_values[-1])
+            self._latest_frame_minimum = int(last_values.min())
+            self._latest_frame_maximum = int(last_values.max())
+            self._latest_timestamp = int(timestamps[last])
+            self._latest_received_ns = int(received_ns[last])
 
+            history = self._waveform_records
+            if count == 1 or bool((deltas[-(count - 1):] >= 0).all()):
+                # Monotonic batch: trimming once at its newest cutoff equals
+                # trimming after every frame.
+                history.extend(records)
+                cutoff = int(timestamps[last]) - self._waveform_history_ticks
+                while history and int.from_bytes(history[0][:8], "little") < cutoff:
+                    history.popleft()
+            else:
+                for index, record in enumerate(records):
+                    history.append(record)
+                    cutoff = int(timestamps[index]) - self._waveform_history_ticks
+                    while history and int.from_bytes(history[0][:8], "little") < cutoff:
+                        history.popleft()
+
+            # Every frame replaces the previous preview; within one batch no
+            # consumer can take the intermediate ones.
             if self._preview is not None and (
                 self._preview.generation > self._consumed_preview_generation
             ):
                 self._replaced_preview_frames += 1
-            self._preview_generation += 1
+            self._replaced_preview_frames += count - 1
+            self._preview_generation += count
             self._preview = ScopeCurrentPreview(
                 generation=self._preview_generation,
-                timestamp=timestamp,
-                received_ns=received_ns,
-                record=record,
+                timestamp=int(timestamps[last]),
+                received_ns=int(received_ns[last]),
+                record=records[last],
                 geometry=geometry,
             )
-            self._analysis_lag_ns = max(0, time.perf_counter_ns() - received_ns)
+            now_ns = time.perf_counter_ns()
+            self._analysis_lag_ns = max(0, now_ns - int(received_ns[last]))
             self._maximum_analysis_lag_ns = max(
                 self._maximum_analysis_lag_ns,
-                self._analysis_lag_ns,
+                now_ns - int(min(received_ns)),
             )
-            self._generation += 1
+            self._generation += count
 
     def note_rejected_frame(self) -> None:
         with self._lock:

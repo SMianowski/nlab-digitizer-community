@@ -16,9 +16,10 @@ from collections import deque
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import cached_property
 from pathlib import Path
 from queue import Empty, Full, Queue
-from typing import TYPE_CHECKING, NotRequired, Protocol, TypedDict
+from typing import TYPE_CHECKING, NotRequired, Protocol, TypedDict, cast
 
 import h5py
 import numpy as np
@@ -98,20 +99,47 @@ class ScopeSumGeometry:
         return self.frame_samples // 4 + self.gap_cycles
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ScopeSumPacket:
+    """One decoded packet; per-window values are read-only uint64 arrays.
+
+    Arrays (not tuples) keep decode and analysis vectorised: per-window
+    Python work limited a reader to ~2700 packets/s (decode 203 us plus
+    analysis 167 us per IP124 packet). ``records`` remains for callers that
+    want (timestamp, sum) pairs.
+    """
+
     ip_version: int
     sequence: int
     samples_per_window: int
     gap_cycles: int
     missed_windows: int
     stop_flush: bool
-    records: tuple[tuple[int, int], ...]
+    timestamps: np.ndarray
+    sums: np.ndarray
     raw: bytes
+
+    @cached_property
+    def records(self) -> tuple[tuple[int, int], ...]:
+        return tuple(zip(self.timestamps.tolist(), self.sums.tolist(), strict=True))
 
     @property
     def signed_means(self) -> tuple[float, ...]:
-        return tuple(total / self.samples_per_window - 32768.0 for _, total in self.records)
+        means = self.sums / self.samples_per_window - 32768.0
+        return tuple(means.tolist())
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ScopeSumPacket):
+            return NotImplemented
+        return (
+            (self.ip_version, self.sequence, self.samples_per_window, self.gap_cycles,
+             self.missed_windows, self.stop_flush, self.raw)
+            == (other.ip_version, other.sequence, other.samples_per_window, other.gap_cycles,
+                other.missed_windows, other.stop_flush, other.raw)
+            and np.array_equal(self.timestamps, other.timestamps)
+            and np.array_equal(self.sums, other.sums)
+        )
+
 
 
 def decode_sum_packet(raw: bytes, geometry: ScopeSumGeometry | None = None) -> ScopeSumPacket:
@@ -129,28 +157,35 @@ def decode_sum_packet(raw: bytes, geometry: ScopeSumGeometry | None = None) -> S
     stopped = bool(state >> 63)
     if not 1 <= count <= capacity or (count != capacity and not stopped):
         raise ValueError("Invalid sum valid_count or partial packet without STOP flush")
+    owned = bytes(raw)
+    interval = np.uint64(actual.interval_ticks)
     if version == 124:
-        sums = struct.unpack_from("<508Q", raw, 32)
-        if any(value != sums[count - 1] for value in sums[count:]):
+        stored = np.frombuffer(owned, dtype="<u8", count=508, offset=32)
+        if (stored[count:] != stored[count - 1]).any():
             raise ValueError("Invalid last-valid-value padding in IP124 packet")
-        records = tuple(
-            ((first + i * actual.interval_ticks) & MASK64, sums[i]) for i in range(count)
-        )
+        sums = stored[:count]
+        # uint64 arithmetic wraps modulo 2**64, i.e. the original "& MASK64".
+        timestamps = np.uint64(first) + np.arange(count, dtype=np.uint64) * interval
+        timestamps.flags.writeable = False
     else:
-        if any(raw[32 + count * 16 :]):
+        if any(owned[32 + count * 16 :]):
             raise ValueError("Nonzero IP123 packet padding")
-        records = tuple(struct.unpack_from("<QQ", raw, 32 + i * 16) for i in range(count))
-        if records[0][0] != first:
+        pairs = np.frombuffer(owned, dtype="<u8", count=2 * count, offset=32).reshape(count, 2)
+        timestamps, sums = pairs[:, 0], pairs[:, 1]
+        if int(timestamps[0]) != first:
             raise ValueError("Header timestamp differs from the first sum window")
-    previous = None
-    for stamp, total in records:
-        if total > n * 65535:
+    # Report the first failing window, sum check before interval check, as
+    # the original per-window loop did.
+    bad_sum = sums > np.uint64(n * 65535)
+    deltas = timestamps[1:] - timestamps[:-1]
+    bad_delta = np.zeros(count, dtype=bool)
+    bad_delta[1:] = (deltas == 0) | (deltas >= np.uint64(1 << 63)) | (deltas % interval != 0)
+    failing = bad_sum | bad_delta
+    if failing.any():
+        index = int(np.argmax(failing))
+        if bad_sum[index]:
             raise ValueError("Sum exceeds N * full-scale ADC code")
-        if previous is not None:
-            delta = (stamp - previous) & MASK64
-            if not 0 < delta < (1 << 63) or delta % actual.interval_ticks:
-                raise ValueError("Nonmonotonic or off-grid sum timestamp")
-        previous = stamp
+        raise ValueError("Nonmonotonic or off-grid sum timestamp")
     return ScopeSumPacket(
         version,
         state & 0xFFFFFFFF,
@@ -158,8 +193,9 @@ def decode_sum_packet(raw: bytes, geometry: ScopeSumGeometry | None = None) -> S
         gap,
         (state >> 32) & 0x7FFFFFFF,
         stopped,
-        records,
-        bytes(raw),
+        timestamps,
+        sums,
+        owned,
     )
 
 
@@ -169,8 +205,42 @@ class ScopeSumContinuity:
     def __init__(self) -> None:
         self.previous: ScopeSumPacket | None = None
         self.skipped_windows = 0
+        # Packets accepted by the latest append_many() before any error.
+        self.accepted = 0
 
     def append(self, packet: ScopeSumPacket) -> None:
+        self.append_many((packet,))
+
+    def append_many(self, packets: Sequence[ScopeSumPacket]) -> None:
+        """Same as append() per packet; in-packet gaps are summed in one pass."""
+        accepted = 0
+        try:
+            for packet in packets:
+                self._check_boundary(packet)
+                self.previous = packet
+                accepted += 1
+        finally:
+            self.accepted = accepted
+            self._add_internal_skips(packets[:accepted])
+
+    def _add_internal_skips(self, packets: Sequence[ScopeSumPacket]) -> None:
+        if not packets:
+            return
+        sizes = {packet.timestamps.size for packet in packets}
+        intervals = {packet.samples_per_window // 4 + packet.gap_cycles for packet in packets}
+        if len(sizes) == 1 and len(intervals) == 1:
+            stamps = np.stack([packet.timestamps for packet in packets])
+            steps = stamps[:, 1:] - stamps[:, :-1]  # wraps like & MASK64
+            interval = np.uint64(intervals.pop())
+            self.skipped_windows += sum((steps // interval).sum(axis=1).tolist()) - steps.size
+            return
+        for packet in packets:
+            steps = packet.timestamps[1:] - packet.timestamps[:-1]
+            if steps.size:
+                interval = np.uint64(packet.samples_per_window // 4 + packet.gap_cycles)
+                self.skipped_windows += sum((steps // interval).tolist()) - steps.size
+
+    def _check_boundary(self, packet: ScopeSumPacket) -> None:
         old = self.previous
         interval = packet.samples_per_window // 4 + packet.gap_cycles
         if old is not None:
@@ -184,13 +254,10 @@ class ScopeSumContinuity:
                 packet.gap_cycles,
             ):
                 raise ValueError("Sum geometry changed during acquisition")
-            delta = (packet.records[0][0] - old.records[-1][0]) & MASK64
+            delta = (int(packet.timestamps[0]) - int(old.timestamps[-1])) & MASK64
             if not 0 < delta < (1 << 63) or delta % interval:
                 raise ValueError("Sum packet timestamps are nonmonotonic or off-grid")
             self.skipped_windows += delta // interval - 1
-        for (before, _), (after, _) in zip(packet.records, packet.records[1:]):
-            self.skipped_windows += ((after - before) & MASK64) // interval - 1
-        self.previous = packet
 
 
 class ScopeSumWriter:
@@ -247,12 +314,11 @@ class ScopeSumWriter:
         if not packets:
             return
         raw = np.frombuffer(b"".join(packet.raw for packet in packets), dtype="u1")
-        counts = np.asarray([len(packet.records) for packet in packets], dtype="<u2")
-        records = np.fromiter(
-            (value for packet in packets for record in packet.records for value in record),
-            dtype="<u8",
-            count=2 * sum(len(packet.records) for packet in packets),
-        ).reshape(-1, 2)
+        counts = np.asarray([packet.timestamps.size for packet in packets], dtype="<u2")
+        records = np.column_stack((
+            np.concatenate([packet.timestamps for packet in packets]),
+            np.concatenate([packet.sums for packet in packets]),
+        )).astype("<u8", copy=False)
         row = self._packets.shape[0]
         self._packets.resize(row + len(packets), axis=0)
         self._packets[row:] = raw.reshape(-1, 4096)
@@ -421,11 +487,10 @@ def read_sum_capture(path: Path) -> Iterator[ScopeSumPacket]:
         for index, row in enumerate(source["packets"]):
             packet = decode_sum_packet(row.tobytes())
             continuity.append(packet)
-            count = len(packet.records)
+            count = packet.timestamps.size
             if int(source["valid_counts"][index]) != count:
                 raise ValueError("Stored valid_count differs from raw packet")
-            for col, name in enumerate(("timestamps", "sums")):
-                expected = np.asarray([r[col] for r in packet.records], dtype="<u8")
+            for name, expected in (("timestamps", packet.timestamps), ("sums", packet.sums)):
                 if not np.array_equal(source[name][offset : offset + count], expected):
                     raise ValueError(f"Stored {name} differs from raw packet")
             offset += count
@@ -445,25 +510,73 @@ class ScopeSumAnalysis:
         self.packet_count = self.window_count = self.sample_count = self.signed_sum = 0
         self.missed_windows = self.coverage_ns = 0
         self.continuity = ScopeSumContinuity()
+        # Set when this object mirrors an analysis that runs elsewhere (the
+        # Scope sum reader process); snapshot() then returns it.
+        self._mirror: ScopeSumSnapshot | None = None
+
+    def adopt_snapshot(self, snapshot: ScopeSumSnapshot) -> None:
+        """Mirror a snapshot produced by the reader process's own analysis."""
+        with self._lock:
+            self._mirror = snapshot
+            self.packet_count = snapshot["packets"]
+            self.window_count = snapshot["windows"]
+            self.sample_count = snapshot["samples"]
+            self.signed_sum = snapshot["signed_sum"]
+            self.coverage_ns = snapshot["coverage_ns"]
+            self.missed_windows = snapshot["missed"]
 
     def append(self, packet: ScopeSumPacket) -> None:
+        self.append_many((packet,))
+
+    def append_many(self, packets: Sequence[ScopeSumPacket]) -> None:
+        """Same as append() per packet, in one vectorised pass per batch.
+
+        Packets before a continuity error are accounted, then it is raised.
+        """
         with self._lock:
-            self.continuity.append(packet)
-            n = packet.samples_per_window
-            for timestamp, total in packet.records:
-                if self._last_timestamp is not None:
-                    self._elapsed_ticks += (timestamp - self._last_timestamp) & MASK64
-                self._last_timestamp = timestamp
-                self._points.append((self._elapsed_ticks * 8e-9, total / n - 32768.0))
-                self.signed_sum += total - n * 32768
-            self.packet_count += 1
-            self.window_count += len(packet.records)
-            self.sample_count += n * len(packet.records)
-            self.coverage_ns += n * 2 * len(packet.records)
-            self.missed_windows = packet.missed_windows
+            error: Exception | None = None
+            try:
+                self.continuity.append_many(packets)
+            except Exception as exc:
+                error = exc
+            accepted = packets[: self.continuity.accepted]
+            if accepted:
+                self._accumulate(accepted)
+            if error is not None:
+                raise error
+
+    def _accumulate(self, packets: Sequence[ScopeSumPacket]) -> None:
+        # Continuity has verified one geometry and steps below 2**63.
+        n = packets[0].samples_per_window
+        timestamps = np.concatenate([packet.timestamps for packet in packets])
+        sums = np.concatenate([packet.sums for packet in packets])
+        count = int(timestamps.size)
+        steps = np.empty(count, dtype=np.uint64)
+        steps[0] = (
+            0 if self._last_timestamp is None
+            else (int(timestamps[0]) - self._last_timestamp) & MASK64
+        )
+        steps[1:] = timestamps[1:] - timestamps[:-1]  # wraps like & MASK64
+        elapsed = self._elapsed_ticks + np.cumsum(steps.astype(np.int64))
+        self._elapsed_ticks = int(elapsed[-1])
+        self._last_timestamp = int(timestamps[-1])
+        # Only the newest maxlen points survive the bounded display history.
+        tail = slice(-self._points.maxlen, None) if self._points.maxlen else slice(None)
+        self._points.extend(zip(
+            (elapsed[tail] * 8e-9).tolist(), (sums[tail] / n - 32768.0).tolist(), strict=True,
+        ))
+        self.signed_sum += int(sums.sum(dtype=np.uint64)) - n * 32768 * count
+        self.packet_count += len(packets)
+        self.window_count += count
+        self.sample_count += n * count
+        self.coverage_ns += n * 2 * count
+        self.missed_windows = packets[-1].missed_windows
 
     def snapshot(self) -> ScopeSumSnapshot:
         with self._lock:
+            if self._mirror is not None:
+                mirrored: ScopeSumSnapshot = self._mirror.copy()
+                return mirrored
             result: ScopeSumSnapshot = dict(
                 points=tuple(self._points),
                 packets=self.packet_count,
@@ -651,12 +764,14 @@ class ScopeSumCapture:
             log_level=logging.getLogger().getEffectiveLevel(),
         )
 
-        def data(items: list[bytes], _dropped: int) -> None:
-            # The child's sum queue is lossless; packets arrive in order.
-            for raw in items:
-                self.analysis.append(decode_sum_packet(raw))
+        def note(key: str, value: object = None) -> None:
+            # The reader process analyses every packet itself (exact totals,
+            # continuity checks); the GUI only mirrors throttled snapshots, so
+            # GUI load can never slow the reader or lose sums.
+            if key == "analysis" and isinstance(value, dict):
+                self.analysis.adopt_snapshot(cast(ScopeSumSnapshot, value))
 
-        handlers: dict[str, Callable[..., None]] = {"data": data}
+        handlers: dict[str, Callable[..., None]] = {"note": note}
         if ready is not None:
             handlers["ready"] = ready
         session = ReaderSession(sum_main, request, label=sum_label(self.channel))
@@ -669,6 +784,9 @@ class ScopeSumCapture:
             if callable(adopt):
                 report = session.finished
                 adopt(None if report is None else bool(report.get("fault_latched")))
+        final = finished.get("snapshot")
+        if isinstance(final, dict):
+            self.analysis.adopt_snapshot(cast(ScopeSumSnapshot, final))
         raise_child_error(finished)
         missed = finished.get("final_missed_windows")
         return self.analysis.snapshot() | {

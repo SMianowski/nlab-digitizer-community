@@ -31,6 +31,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accumulator sustained ~5200 frames/s, each analysed); display-only waveforms use a
   bounded queue with counted drops. If the GUI dies mid-capture, the reader clears
   `enable`/`dma_enable` and closes its file (validated live).
+- Faster Current analysis. The Scope current accumulator reduces each forwarded batch
+  in one numpy pass (`append_frames`), and the display buffer only decodes frames it
+  can keep (`append_records`): 64-83k -> 205-589k frames/s idle, 8.5-114k next to a
+  busy GUI thread. A randomized test checks equality with the original per-frame
+  algorithm. Periodic-sum decode and analysis are vectorised (203 + 167 -> 26 + 52
+  us per IP124 packet), and sums are now analysed entirely in the reader process;
+  the GUI mirrors snapshots at <= 10 Hz instead of re-analysing every packet, so GUI
+  load no longer slows the sum reader. Sum mode now saturates at the board's ~25 MB/s
+  (~6100 packets/s; previously ~2470 packets/s, client-limited).
+- Measured Current limits (v124, ch0, live). Periodic sums, coverage = captured
+  window time / wall time over 10 s: gap 0 gives the densest coverage (the FPGA's
+  one skipped window per 508 costs less than any gap); N=192 (384 ns) 99.41%,
+  N=256 (512 ns) 99.61%, N=1024 99.80%; with a busy GUI thread N=256 still 99.32%.
+  Below ~160 samples the ~3.1 M windows/s transport ceiling caps coverage (N=128:
+  77-81%). TIMED waveform mode is target-limited: ~20k frames/s per-frame ceiling,
+  ~26 MB/s for long frames, and the Scope DMA queue of at most four one-frame blocks
+  turns network/target stalls into skipped triggers at any kHz rate (also with an
+  in-process reader). Smallest usable TIMED frame is 8 samples (4 averages to none).
 - MCA list mode now arms 64 kernel blocks (1 MiB per channel) instead of the
   PetaLinux reference value of eight. Live on v121 ch0, even a reader with no GUI
   saw 20-50 ms stalls that emptied eight blocks (`queued_blocks` 0) and the IP

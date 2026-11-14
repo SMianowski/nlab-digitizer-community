@@ -15,7 +15,7 @@ import struct
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -247,6 +247,44 @@ class ScopeFrameBuffer:
             subscribers = tuple(self._subscribers)
         for subscriber in subscribers:
             subscriber.append(frame)
+
+    def append_records(
+        self,
+        records: Sequence[bytes],
+        geometry: ScopeDmaGeometry,
+        received_ns: Sequence[int],
+    ) -> None:
+        """Publish complete raw records; same result as append() for each in order.
+
+        Only the newest ``max_frames`` records can survive one call, so older
+        ones are counted as dropped without being decoded into frames.
+        """
+        count = len(records)
+        keep = min(count, self._max_frames)
+        skipped = count - keep
+        frames = [
+            ScopeDmaFrame(
+                timestamp=int.from_bytes(record[:8], "little"),
+                received_ns=int(stamp),
+                samples=np.frombuffer(
+                    record,
+                    dtype="<i2",
+                    count=geometry.waveform_samples,
+                    offset=SCOPE_TIMESTAMP_WORDS * 2,
+                ),
+                geometry=geometry,
+            )
+            for record, stamp in zip(records[skipped:], received_ns[skipped:], strict=True)
+        ]
+        with self._lock:
+            self._dropped_frames += skipped
+            for _ in range(max(0, len(self._frames) + keep - self._max_frames)):
+                self._frames.popleft()
+                self._dropped_frames += 1
+            self._frames.extend(frames)
+            subscribers = tuple(self._subscribers)
+        for subscriber in subscribers:
+            subscriber.append_records(records, geometry, received_ns)
 
     def add_dropped(self, frames: int) -> None:
         """Account frames an upstream display queue (the reader process) dropped."""
@@ -867,24 +905,15 @@ class IIOScopeDmaStreamer:
         def data(items: list[tuple[bytes, int]], dropped: int) -> None:
             nonlocal dropped_seen
             if items:
+                # One batch call per message: per-frame Python work here was
+                # the Current DMA limit with a busy GUI thread.
                 layout = geometry[0]
-                for record, received_ns in items:
-                    if current_accumulator is not None:
-                        current_accumulator.append_frame(record, layout, received_ns)
-                    if frame_buffer is not None:
-                        frame_buffer.append(
-                            ScopeDmaFrame(
-                                timestamp=int.from_bytes(record[:8], "little"),
-                                received_ns=received_ns,
-                                samples=np.frombuffer(
-                                    record,
-                                    dtype="<i2",
-                                    count=layout.waveform_samples,
-                                    offset=SCOPE_TIMESTAMP_WORDS * 2,
-                                ),
-                                geometry=layout,
-                            )
-                        )
+                records = [record for record, _ in items]
+                stamps = [stamp for _, stamp in items]
+                if current_accumulator is not None:
+                    current_accumulator.append_frames(records, layout, stamps)
+                if frame_buffer is not None:
+                    frame_buffer.append_records(records, layout, stamps)
             if dropped > dropped_seen:
                 if frame_buffer is not None:
                     frame_buffer.add_dropped(dropped - dropped_seen)

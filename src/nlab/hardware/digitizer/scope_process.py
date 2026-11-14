@@ -11,7 +11,9 @@ lifecycle, including file recording. The GUI's consumers stay in the parent:
   the accumulator still sees every captured frame (gaps show as skipped
   opportunities in the hardware timestamps, as before).
 * Display-only waveforms use a bounded queue; drops are counted.
-* Periodic sums are always lossless: ScopeSumAnalysis needs every packet.
+* Periodic sums are analysed completely in the child, where every packet is
+  seen; the GUI mirrors throttled snapshots. GUI load therefore never slows
+  the sum reader (per-packet GUI-side work did, next to a busy GUI thread).
 
 Receive times are stamped in the child with ``time.perf_counter_ns()``. That
 clock is system-wide on Windows (QueryPerformanceCounter) and Linux
@@ -21,6 +23,7 @@ clock is system-wide on Windows (QueryPerformanceCounter) and Linux
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,7 +46,7 @@ log = logging.getLogger(__name__)
 # Queue bounds in bytes of payload, converted to items per geometry.
 _LOSSLESS_QUEUE_BYTES = 32 * 1024 * 1024
 _DISPLAY_QUEUE_BYTES = 8 * 1024 * 1024
-_SUM_QUEUE_PACKETS = 4096
+_SUM_SNAPSHOT_SECONDS = 0.1
 
 
 @dataclass(frozen=True)
@@ -188,22 +191,35 @@ def _sum_session(context: ChildContext, request: ScopeSumRequest) -> Mapping[str
         ScopeSumPacket,
     )
 
-    packets = context.outbox.open_data(max_items=_SUM_QUEUE_PACKETS, lossless=True)
+    changed = threading.Event()
+    finished = threading.Event()
 
-    class ForwardingAnalysis(ScopeSumAnalysis):
-        """Keep the child's counters (run() uses them) and forward packets."""
+    class PublishingAnalysis(ScopeSumAnalysis):
+        """The session's real analysis; the publisher thread mirrors it."""
 
         def append(self, packet: ScopeSumPacket) -> None:
             super().append(packet)
-            packets.put(packet.raw)
+            changed.set()
 
+    analysis = PublishingAnalysis()
+
+    def publish() -> None:
+        # Latest state within 100 ms of any change, never per packet.
+        while not finished.wait(_SUM_SNAPSHOT_SECONDS):
+            if changed.is_set():
+                changed.clear()
+                context.outbox.note("analysis", analysis.snapshot())
+
+    publisher = threading.Thread(target=publish, name="sum-snapshots", daemon=True)
+    publisher.start()
     backend = None
+    capture = None
     try:
         backend = _open_backend(request.uri, request.channel)
         capture = ScopeSumCapture(
             backend, request.channel, configuration_yaml=request.configuration_yaml,
         )
-        capture.analysis = ForwardingAnalysis()
+        capture.analysis = analysis
         context.set_stop_hook(capture.request_stop)
         snapshot = cast(dict[str, Any], capture.run(
             Path(request.filepath) if request.filepath else None,
@@ -216,4 +232,7 @@ def _sum_session(context: ChildContext, request: ScopeSumRequest) -> Mapping[str
             "final_missed_windows": int(snapshot.get("final_missed_windows") or 0),
         }
     finally:
+        finished.set()
+        publisher.join()
+        context.result["snapshot"] = analysis.snapshot()
         _close_backend(context, backend, sum_label(request.channel))
