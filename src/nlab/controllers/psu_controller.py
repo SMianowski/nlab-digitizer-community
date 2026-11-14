@@ -15,6 +15,7 @@ from nlab.hardware.digitizer.scope import ListSpec, RangeSpec
 from nlab.ui.ui_psu_view import Ui_PSUView
 from nlab.views.numeric_controls import bind_numeric_control
 from nlab.views.responsive_layout import configure_psu_layout
+from nlab.workers.base_worker import pause_requests
 from nlab.workers.psu_worker import PSUReadback, PSUWorker
 
 log = logging.getLogger(__name__)
@@ -306,6 +307,7 @@ class PSUController(QWidget):
             read_sipm=self._sipm_available,
             interval_ms=interval_ms,
         )
+        self._worker.set_initial_paused(pause_requests(self).active)
         self._worker_thread = QThread(self)
         self._worker_stop_requested = False
         self._worker.moveToThread(self._worker_thread)
@@ -329,6 +331,19 @@ class PSUController(QWidget):
         log.info(
             "PSU: monitoring started (interval %d ms, sipm=%s)", interval_ms, self._sipm_available
         )
+
+    def set_readbacks_paused(self, reason: str, paused: bool) -> None:
+        """Pause or resume HV/temperature readback polling for *reason*.
+
+        Readbacks only; HV setpoints and safety writes are never affected.
+        """
+        requests = pause_requests(self)
+        if not requests.update(reason, paused):
+            return
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
+            worker.set_paused.emit(requests.active)
+        log.info("PSU: readbacks %s (%s)", "paused" if requests.active else "resumed", reason)
 
     def _on_stop_monitor(self) -> None:
         self.request_monitor_stop()

@@ -60,6 +60,9 @@ class TemperatureCorrectionWorker(BaseWorker):
         if self._stop_requested.is_set():
             self._stop()
             return
+        if self._paused:
+            self._timer.setInterval(self._interval_ms)
+            return
         self._tick()
         if not self._finished:
             self._timer.start(self._interval_ms)

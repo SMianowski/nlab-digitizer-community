@@ -92,10 +92,10 @@ def test_marker_hardware_readback_and_default_reset_update_sliders(scope):
     assert scope.ui.sliderFrameGap.value() == 0
 
 
-@pytest.mark.parametrize("mode", [TriggerMode.TIMED, TriggerMode.PERIODIC_SUM])
-def test_loaded_periodic_setting_cannot_start_scope_or_acquire_frame(scope, monkeypatch, mode):
-    # Legacy settings may still contain a periodic driver mode. Readback must
-    # not silently select a different waveform mode or start that hidden mode.
+def test_loaded_sum_setting_cannot_start_scope_or_acquire_frame(scope, monkeypatch):
+    # Structured periodic sums are not waveforms. A loaded sum mode must not
+    # silently select a different waveform trigger or start a viewer capture.
+    mode = TriggerMode.PERIODIC_SUM
     monkeypatch.setattr(scope._scope, "get_trigger_mode", lambda: mode)
     start = Mock()
     acquire = Mock()
@@ -107,12 +107,27 @@ def test_loaded_periodic_setting_cannot_start_scope_or_acquire_frame(scope, monk
 
     scope._on_start()
     assert not scope.ui.btnStart.isChecked()
-    assert "belongs to Current" in scope.status.text()
+    assert "periodic sums" in scope.status.text().lower()
     scope._on_acquire_frame()
     scope._request_frame()
     start.assert_not_called()
     acquire.assert_not_called()
     assert not scope._refresh_timer.isActive()
+
+
+def test_loaded_periodic_waveform_setting_selects_periodic_and_starts(scope, monkeypatch):
+    monkeypatch.setattr(scope._scope, "get_trigger_mode", lambda: TriggerMode.TIMED)
+    start = Mock()
+    monkeypatch.setattr(scope._scope, "start", start)
+    scope._load_hardware_state()
+    assert scope.ui.comboTriggerMode.currentData() == int(TriggerMode.TIMED)
+    try:
+        scope._on_start()
+        start.assert_called_once_with()
+        assert scope._refresh_timer.isActive()
+    finally:
+        scope._refresh_timer.stop()
+        scope.ui.btnStart.setChecked(False)
 
 
 def test_current_periodic_dma_still_passes_the_scope_start_guard(scope, monkeypatch):

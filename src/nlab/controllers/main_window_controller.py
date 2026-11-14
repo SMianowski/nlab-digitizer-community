@@ -681,6 +681,17 @@ class MainWindowController:
                 self._psu_controller_by_device[idx] = psu_ctrl
                 psu_docks.append(self._make_dock(f"psu_ch{ch}", ch_label, psu_ctrl))
 
+        # A Current capture may ask the MCA, PSU and Global pollers to pause
+        # so they do not compete with the capture on the board's iiod.
+        for current_ctrl in self._current_monitor_controllers:
+            self._connect_optional_signal(
+                current_ctrl,
+                "readback_pause_changed",
+                partial(
+                    self._set_board_readbacks_paused,
+                    f"Current {getattr(current_ctrl, 'channel', id(current_ctrl))}",
+                ),
+            )
         self._populate_dock_host(self._scope_dock_host, scope_docks)
         self._populate_dock_host(self._current_dock_host, current_docks)
         self._populate_dock_host(self._mca_dock_host, mca_docks)
@@ -1274,6 +1285,14 @@ class MainWindowController:
     def mca_histogram_under_mouse(self) -> bool:
         """Return whether the pointer is over any live MCA histogram."""
         return any(ctrl.histogram_under_mouse() for ctrl in self._mca_controllers)
+
+    def _set_board_readbacks_paused(self, reason: str, paused: bool) -> None:
+        for mca_controller in self._mca_controllers:
+            mca_controller.set_readbacks_paused(reason, paused)
+        for psu_controller in self._psu_controllers:
+            psu_controller.set_readbacks_paused(reason, paused)
+        for global_controller in self._all_global_controllers():
+            global_controller.set_readbacks_paused(reason, paused)
 
     def reset_all_zoom(self) -> None:
         """Auto-range/reset zoom on every live plot."""

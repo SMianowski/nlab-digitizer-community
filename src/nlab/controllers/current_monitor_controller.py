@@ -71,6 +71,8 @@ class CurrentMonitorController(QWidget):
     """Current monitoring from IIR, Scope waveforms, or structured periodic sums."""
 
     session_samples = Signal(int, object)
+    # True while a live acquisition wants MCA/HV/temperature polling paused.
+    readback_pause_changed = Signal(bool)
 
     def __init__(
         self,
@@ -194,6 +196,11 @@ class CurrentMonitorController(QWidget):
         self.ui.comboMode.currentIndexChanged.connect(self._on_mode_changed)
         self.ui.btnSumFile.clicked.connect(self._choose_sum_output)
         self.ui.btnOpenSums.clicked.connect(self._choose_sum_capture)
+        self.ui.cbPauseReadbacks.toggled.connect(
+            lambda _checked: self._sync_readback_pause(
+                getattr(self, "_controls_running", False)
+            )
+        )
 
     def _is_running(self) -> bool:
         return (
@@ -214,7 +221,26 @@ class CurrentMonitorController(QWidget):
             and self._scope_controller.current_dma_supported()
         )
 
+    def _sync_readback_pause(self, running: bool) -> None:
+        """Request a board readback pause while a live acquisition runs (opt-in).
+
+        MCA, HV and temperature polling share the board's iiod with Current.
+        Live, MCA polling alone cut periodic-sum coverage (256 samples, gap 0)
+        from ~99% to ~92%.
+        """
+        self._controls_running = running
+        wanted = (
+            running
+            and self.ui.cbPauseReadbacks.isChecked()
+            and not self._sum_replay_active
+            and not self._replay_hardware_interlocked
+        )
+        if wanted != getattr(self, "_readback_pause_requested", False):
+            self._readback_pause_requested = wanted
+            self.readback_pause_changed.emit(wanted)
+
     def _set_running_controls(self, running: bool) -> None:
+        self._sync_readback_pause(running)
         sum_mode = self.ui.comboMode.currentIndex() == _MODE_PERIODIC_SUM
         record_enabled = (
             sum_mode and not running and self._sum_supported()
@@ -1109,6 +1135,7 @@ class CurrentMonitorController(QWidget):
             "display_fps": self._display_hz,
             "dma_gap_cycles": self._dma_gap_cycles(),
             "sum_frame_samples": self._sum_frame_samples(),
+            "pause_readbacks": self.ui.cbPauseReadbacks.isChecked(),
             "analysis_bin_ms": (
                 self._scope_current_accumulator.bin_width_ms
                 if self._scope_current_accumulator is not None
@@ -1139,6 +1166,8 @@ class CurrentMonitorController(QWidget):
                 self.ui.comboMode.setCurrentIndex(target)
                 if restart:
                     self.start_monitor()
+        if "pause_readbacks" in settings:
+            self.ui.cbPauseReadbacks.setChecked(bool(settings["pause_readbacks"]))
         if "zero_code" in settings:
             self.ui.spinZero.setValue(float(settings["zero_code"]))
         if "scale_per_code" in settings:

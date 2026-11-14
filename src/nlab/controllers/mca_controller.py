@@ -42,6 +42,7 @@ from nlab.views.panel_status import PanelStatus
 from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE, ModifierZoomViewBox
 from nlab.views.responsive_layout import configure_mca_layout
 from nlab.views.time_axis import format_duration_ns, time_axis_scale
+from nlab.workers.base_worker import pause_requests
 from nlab.workers.dma_workers import IIOMcaDmaWorker
 from nlab.workers.mca_worker import MCAReadback, MCAWorker
 
@@ -2137,9 +2138,40 @@ class MCAController(QWidget):
             or self.ui.plotDebug.isVisible()
         )
 
+    def _readbacks_paused(self) -> bool:
+        return pause_requests(self).active
+
+    def set_readbacks_paused(self, reason: str, paused: bool) -> None:
+        """Pause or resume readback polling on behalf of *reason*.
+
+        Used by Current captures: MCA polling (~12 IIO round trips per tick)
+        shares the board's iiod with the capture stream, and live it cut
+        Current periodic-sum coverage (256 samples, gap 0) from ~99% to
+        ~92% with both MCAs polled at 15 Hz. Reasons are tracked separately
+        so one channel's capture ending cannot resume polling another needs
+        paused. The hardware measurement itself is never touched.
+        """
+        requests = pause_requests(self)
+        if not requests.update(reason, paused):
+            return
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
+            worker.set_paused.emit(requests.active)
+        log.info(
+            "MCA ch%d: readbacks %s (%s)",
+            self._channel, "paused" if requests.active else "resumed", reason,
+        )
+        if getattr(self, "_measurement_active", False):
+            self.status.setText(
+                "Readbacks paused during Current capture; the measurement continues."
+                if requests.active else "Readbacks resumed."
+            )
+
     def _start_worker(self) -> None:
         interval_ms = self._effective_poll_interval_ms()
-        self._worker = MCAWorker(self._mca, interval_ms=interval_ms)
+        self._worker = MCAWorker(
+            self._mca, interval_ms=interval_ms, paused=self._readbacks_paused(),
+        )
         MCAController._sync_worker_read_policy(self)
         self._worker_thread = QThread(self)
         self._worker.moveToThread(self._worker_thread)

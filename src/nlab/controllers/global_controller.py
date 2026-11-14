@@ -14,6 +14,7 @@ from nlab.hardware.digitizer.digitizer import Digitizer
 from nlab.hardware.digitizer.mca import MCA_PARAMETER_SPECS, MCAParam
 from nlab.ui.ui_global_view import Ui_GlobalView
 from nlab.views.responsive_layout import configure_global_layout
+from nlab.workers.base_worker import pause_requests
 from nlab.workers.global_diagnostics_worker import GlobalDiagnosticsWorker
 from nlab.workers.temperature_correction_worker import (
     T_MAX,
@@ -293,6 +294,7 @@ class GlobalController(QWidget):
             self.ui.spinTempOffset.value(),
             self.ui.spinTemperatureInterval.value(),
         )
+        worker.set_initial_paused(pause_requests(self).active)
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -693,9 +695,28 @@ class GlobalController(QWidget):
             return
         self.ui.lblSoftwareState.setText("LOW")
 
+    def set_readbacks_paused(self, reason: str, paused: bool) -> None:
+        """Pause or resume diagnostics and temperature-correction polling.
+
+        While paused the temperature correction holds its last applied value.
+        """
+        requests = pause_requests(self)
+        if not requests.update(reason, paused):
+            return
+        for worker in (
+            getattr(self, "_worker", None), getattr(self, "_temperature_worker", None),
+        ):
+            if worker is not None:
+                worker.set_paused.emit(requests.active)
+        log.info(
+            "Global: diagnostics and temperature readbacks %s (%s)",
+            "paused" if requests.active else "resumed", reason,
+        )
+
     def _start_diagnostics(self) -> None:
         interval_ms = self.ui.spinDiagnosticsInterval.value()
         self._worker = GlobalDiagnosticsWorker(self.device, interval_ms)
+        self._worker.set_initial_paused(pause_requests(self).active)
         self._worker_thread = QThread(self)
         self._worker_stop_requested = False
         self._worker.moveToThread(self._worker_thread)

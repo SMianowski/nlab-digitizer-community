@@ -34,6 +34,9 @@ class GlobalDiagnosticsWorker(BaseWorker):
         if self._stop_requested.is_set():
             self._stop()
             return
+        if self._paused:
+            self._timer.setInterval(self._interval_ms)
+            return
         self._tick()
         if not self._finished:
             self._timer.start(self._interval_ms)
@@ -55,6 +58,7 @@ class GlobalDiagnosticsWorker(BaseWorker):
 
     @Slot(int)
     def _set_interval(self, interval_ms: int) -> None:
+        self._interval_ms = interval_ms
         if self._timer is not None:
             self._timer.setInterval(interval_ms)
 

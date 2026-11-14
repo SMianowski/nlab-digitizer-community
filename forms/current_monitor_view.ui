@@ -28,6 +28,12 @@
       </widget>
      </item>
      <item><widget class="QPushButton" name="btnZero"><property name="text"><string>Set zero from recent samples</string></property><property name="enabled"><bool>false</bool></property></widget></item>
+     <item>
+      <widget class="QCheckBox" name="cbPauseReadbacks">
+       <property name="text"><string>Pause MCA, HV and temperature readbacks during capture</string></property>
+       <property name="toolTip"><string>While this Current acquisition runs, pause MCA histogram/statistics, Power Supply (HV and temperature) and Global diagnostics polling on all channels, so they do not compete with the capture on the board. Measurements and HV setpoints are unaffected; displays update again when Current stops. Temperature correction holds its last applied value while paused.</string></property>
+      </widget>
+     </item>
      <item><spacer name="controlsSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property></spacer></item>
     </layout>
    </item>

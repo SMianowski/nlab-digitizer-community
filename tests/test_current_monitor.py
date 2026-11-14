@@ -126,6 +126,7 @@ def test_controller_renders_calibrated_latest_and_interval_values(qtbot: QtBot) 
         "dma_gap_cycles": 12_500,
         "analysis_bin_ms": 100,
         "sum_frame_samples": 1024,
+        "pause_readbacks": False,
     }
     controller.apply_configuration_settings(
         {
@@ -144,6 +145,7 @@ def test_controller_renders_calibrated_latest_and_interval_values(qtbot: QtBot) 
         "dma_gap_cycles": 10_453,
         "analysis_bin_ms": 100,
         "sum_frame_samples": 1024,
+        "pause_readbacks": False,
     }
     assert controller.ui.spinDmaGap.value() == pytest.approx(83.624)
     controller._on_worker_finished()

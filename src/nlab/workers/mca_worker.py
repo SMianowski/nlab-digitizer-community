@@ -45,11 +45,16 @@ class MCAWorker(BaseWorker):
         self,
         mca: MultiChannelAnalyzer,
         interval_ms: int = 200,
+        paused: bool = False,
     ) -> None:
         super().__init__()
         self._mca = mca
         self._interval_ms = interval_ms
         self._timer: QTimer | None = None
+        # Pausing (BaseWorker.set_paused) only skips readbacks; the hardware
+        # measurement keeps running and a time-limit completion during a
+        # pause is reported on the next poll.
+        self._paused = paused
         self._seen_running = False
         self._last_histogram: np.ndarray = np.empty(0, dtype=np.uint32)
         self._last_debug1: np.ndarray = np.empty(0, dtype=np.int16)
@@ -70,10 +75,14 @@ class MCAWorker(BaseWorker):
         self._timer.timeout.connect(self._tick)
         self.request_stop.connect(self._stop)
         self.change_interval.connect(self._set_interval)
-        self._timer.start(self._interval_ms)
+        if self._paused:
+            self._timer.setInterval(self._interval_ms)
+        else:
+            self._timer.start(self._interval_ms)
 
     @Slot(int)
     def _set_interval(self, ms: int) -> None:
+        self._interval_ms = ms
         if self._timer is not None:
             self._timer.setInterval(ms)
 

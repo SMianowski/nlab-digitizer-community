@@ -82,11 +82,11 @@ display resolution; steps do not reconstruct the analogue waveform.
 
 ## Scope — trigger level and mode {#scope-trigger}
 
-**Mode** offers the connected Scope's level and edge triggers for individual
-waveforms. Periodic acquisition is available only through [Current](#current-mode),
-including structured [Periodic sums](#scope-sums) on IP123/IP124. No periodic
-trigger is selectable in Scope. If loaded settings contain a periodic mode,
-select a level/edge trigger before starting Scope or acquiring a frame.
+**Mode** uses the triggers advertised by the connected Scope. Level and edge
+modes capture individual waveforms. **Periodic** captures a frame at a fixed
+interval set by [Periodic gap](#scope-gap), using the IP122+ mean4 waveform format
+where supported. Structured [Periodic sums](#scope-sums) on IP123/IP124 are not
+waveforms and are available only in [Current](#current-mode).
 
 **Level (raw)** is an ADC-code threshold, not volts or the MCA threshold.
 A negative-going pulse has a falling leading edge. Select a crossing that is
@@ -125,10 +125,11 @@ Use the application's readers or [conversion tools](#conversion).
 
 ## Scope — periodic frame gap {#scope-gap}
 
-Periodic timing is configured in [Current](#current-mode); the gap control is
-hidden in Scope. It is not an inter-event time measured from the detector and
-does not make pulse-triggered events uniformly spaced. Current DMA retains
-its qualified preset and the driver-supported periodic modes.
+**Periodic gap** sets the gap between frames in **Periodic** mode, in nanoseconds
+(8 ns steps); the frame period is frame length plus gap. It is enabled only in
+Periodic mode on supported hardware. It is not an inter-event time measured from
+the detector and does not make pulse-triggered events uniformly spaced. Current
+DMA applies its own [qualified Scope preset](#current-mode).
 
 ## Scope — Start, Stop, and Acquire Frame {#scope-run}
 
@@ -858,6 +859,15 @@ and does not apply the IIR/waveform linear calibration.
 DMA owns the Scope buffer and applies its qualified periodic preset. The stopped
 view can change the DMA frame gap or Reset Scope defaults afterward. Do not start
 another Scope DMA owner on the same channel. The modes' raw scales differ.
+
+**Pause MCA, HV and temperature readbacks during capture** stops MCA
+histogram/statistics, Power Supply (HV and temperature) and Global diagnostics
+polling on every channel while this Current acquisition runs. They all share the
+board's IIO daemon with the capture; measured live, MCA polling alone lowered
+periodic-sum coverage at 256 samples and gap 0 from about 99% to about 92%.
+Measurements and HV setpoints are unaffected, displays resume when Current stops,
+and temperature correction holds its last applied value while paused. Offline
+sum replay never pauses anything.
 
 ## Current — zero, scale, and units {#current-calibration}
 

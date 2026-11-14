@@ -91,6 +91,7 @@ def test_scope_widgets_are_driven_from_hardware_specs(qapp: QApplication) -> Non
         "Any below",
         "Falling edge",
         "Rising edge",
+        "Periodic",
     ]
     assert ui.labelDacValue.text() == "DAC baseline:"
     assert ui.btnAutoSetup.text() == "Auto Setup"
@@ -154,8 +155,7 @@ def test_current_dma_start_configures_v122_periodic_scope(qtbot: QtBot) -> None:
     scope.set_frame_period_cycles.assert_called_once_with(12_500)
     assert controller.ui.spinFrameSamples.value() == 16_376
     assert controller.ui.spinFrameGap.value() == 100_000
-    assert controller.ui.comboTriggerMode.currentIndex() == -1
-    assert controller.ui.comboTriggerMode.findData(int(TriggerMode.TIMED)) == -1
+    assert controller.ui.comboTriggerMode.currentData() == int(TriggerMode.TIMED)
     assert controller.ui.cbDmaEnable.isChecked()
     snapshot = accumulator.snapshot()
     assert snapshot.runtime is not None
@@ -433,20 +433,23 @@ def test_scope_status_message_cannot_widen_controls_panel(qtbot: QtBot) -> None:
     assert "truncated above 4656 ns (2328 ADC samples)" in status.text()
 
 
-def test_scope_hides_periodic_controls_and_only_offers_level_edge_triggers(qtbot: QtBot) -> None:
+def test_scope_offers_periodic_waveforms_but_not_structured_sums(qtbot: QtBot) -> None:
     scope = _scope_model_for_controller()
     scope.supported_trigger_modes.return_value = tuple(TriggerMode)
+    scope.frame_period_cycles_supported.return_value = True
     controller = ScopeController(scope, scope_dma=None, channel=0)
     qtbot.addWidget(controller)
+    combo = controller.ui.comboTriggerMode
 
-    assert [controller.ui.comboTriggerMode.itemData(i) for i in range(4)] == [0, 1, 2, 3]
-    assert controller.ui.comboTriggerMode.count() == 4
-    for mode in (TriggerMode.TIMED, TriggerMode.PERIODIC_SUM):
-        assert controller.ui.comboTriggerMode.findData(int(mode)) == -1
-    for control in (controller.ui.spinFrameGap, controller.ui.labelFrameGap,
-                    controller.ui.sliderFrameGap):
-        assert control.isHidden()
-        assert not control.isEnabled()
+    assert [combo.itemData(i) for i in range(combo.count())] == [0, 1, 2, 3, 4]
+    assert combo.findData(int(TriggerMode.PERIODIC_SUM)) == -1
+    gap_controls = (controller.ui.spinFrameGap, controller.ui.labelFrameGap,
+                    controller.ui.sliderFrameGap)
+    combo.setCurrentIndex(combo.findData(int(TriggerMode.FALLING_EDGE)))
+    assert all(not control.isHidden() and not control.isEnabled() for control in gap_controls)
+    combo.setCurrentIndex(combo.findData(int(TriggerMode.TIMED)))
+    assert all(control.isEnabled() for control in gap_controls)
+    scope.set_trigger_mode.assert_called_with(TriggerMode.TIMED)
 
 
 def test_iio_viewer_limit_is_separate_from_dma_hardware_limit() -> None:

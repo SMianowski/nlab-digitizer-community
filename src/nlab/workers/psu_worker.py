@@ -58,7 +58,10 @@ class PSUWorker(BaseWorker):
         self._timer.timeout.connect(self._tick)
         self.change_interval.connect(self._set_interval)
         self.request_stop.connect(self._stop)
-        self._timer.start(self._interval_ms)
+        if self._paused:
+            self._timer.setInterval(self._interval_ms)
+        else:
+            self._timer.start(self._interval_ms)
 
     @Slot()
     def _stop(self) -> None:
@@ -69,6 +72,7 @@ class PSUWorker(BaseWorker):
 
     @Slot(int)
     def _set_interval(self, ms: int) -> None:
+        self._interval_ms = ms
         if self._timer is not None:
             self._timer.setInterval(ms)
 

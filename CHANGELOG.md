@@ -9,8 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Current: **Pause MCA, HV and temperature readbacks during capture** (off by
+  default, saved with the configuration). While a live Current acquisition runs it
+  pauses MCA histogram/statistics, Power Supply (HV, temperature) and Global
+  diagnostics/temperature-correction polling on every channel; they share the
+  board's iiod with the capture. Live, MCA polling alone lowered periodic-sum
+  coverage (256 samples, gap 0) from ~99% to ~92%, and GUI recordings measured
+  76.9% (256 samples) and 96.5% (512 samples). Pausing never changes measurements
+  or HV setpoints; temperature correction holds its last value while paused. Pause
+  requests are tracked per Current channel, and offline sum replay never pauses.
+
 ### Changed
 
+- Scope offers the **Periodic** (timed) waveform trigger again, with its periodic
+  gap control enabled only in that mode, reverting the Scope part of the 0.8.4
+  restriction. Structured periodic sums remain a Current-only acquisition.
 - MCA list-mode DMA now runs in a dedicated reader process per capture session
   (`nlab/hardware/digitizer/listmode_process.py`). In the GUI process every libiio
   call released the interpreter lock and had to win it back from GUI work, while the
