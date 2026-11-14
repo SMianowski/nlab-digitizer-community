@@ -40,6 +40,7 @@ from nlab.utils.recording_paths import (
     unique_recording_path,
 )
 from nlab.views.energy_axis import CalibratedEnergyAxis
+from nlab.views.histogram_curve import StepHistogramCurve
 from nlab.views.mca_roi_history_dialog import (
     DoubleClickableLinearRegionItem,
     McaRoiHistoryDialog,
@@ -1031,10 +1032,9 @@ class MCAController(QWidget):
         layout.nextRow()
         layout.addLabel("Channel", col=1)
 
-        self._hist_curve = self._hist_plot.plot(
-            pen=pg.mkPen("#1f77b4", width=1),
-            stepMode="center",
-        )
+        # Draws a min/max envelope per pixel column when zoomed out.
+        self._hist_curve = StepHistogramCurve(pen=pg.mkPen("#1f77b4", width=1))
+        self._hist_plot.addItem(self._hist_curve)
 
         self._roi = DoubleClickableLinearRegionItem(values=[100, 200], movable=True)
         self._roi_dragging = False

@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Polling workers (MCA, Power Supply, Global diagnostics and temperature correction,
   Current IIR monitor, external devices) share one thread helper,
   `nlab/workers/worker_thread.py`, for wiring and for the never-terminate join.
+- The MCA spectrum draws a min/max envelope per pixel column when more than two bins
+  share a pixel (`nlab/views/histogram_curve.py`), so peaks and single-bin lines stay
+  visible; zoomed in, the exact step histogram is drawn. Offscreen, a 16,384-bin
+  refresh in a 900 px plot dropped from 4.4 to 2.2 ms (median, set data and paint).
 - The live Coincidence Gaussian timing fit (scipy `curve_fit`) runs on the
   coincidence analysis thread instead of the GUI thread: at most every 0.5 s while
   data streams, and once more on the drained snapshot before the thread exits.
