@@ -44,10 +44,11 @@ from nlab.hardware.digitizer.scope import (
     Scope,
     ScopeParam,
     TriggerMode,
+    range_spec,
 )
 from nlab.ui.ui_scope_view import Ui_ScopeView
 from nlab.utils.recording_paths import measurement_folder, unique_recording_path
-from nlab.views.numeric_controls import bind_numeric_control, normalize_numeric_control
+from nlab.views.numeric_controls import normalize_numeric_control
 from nlab.views.panel_status import PanelStatus
 from nlab.views.plot_viewbox import (
     DraggableScopeCurve,
@@ -55,6 +56,7 @@ from nlab.views.plot_viewbox import (
     ModifierZoomViewBox,
 )
 from nlab.views.responsive_layout import configure_scope_layout
+from nlab.views.spec_binding import bind_slider, bind_spinbox
 from nlab.views.time_axis import format_duration_ns, time_axis_scale
 from nlab.workers.dma_workers import IIOScopeDmaWorker
 from nlab.workers.scope_auto_setup_worker import (
@@ -263,35 +265,23 @@ class ScopeController(QWidget):
     def _apply_parameter_specs(self) -> None:
         specs = self._scope.specs
 
-        spec = specs[ScopeParam.TRIGGER_LEVEL]
-        assert isinstance(spec, RangeSpec)
-        self._apply_range_to_spinbox(self.ui.spinTriggerLevel, spec)
-        self._apply_range_to_slider(self.ui.sliderTriggerLevel, spec)
+        for parameter, spinbox, slider in (
+            (ScopeParam.TRIGGER_LEVEL, self.ui.spinTriggerLevel, self.ui.sliderTriggerLevel),
+            (ScopeParam.DAC_VALUE, self.ui.spinDacValue, self.ui.sliderDacValue),
+        ):
+            spec = range_spec(specs, parameter)
+            bind_spinbox(spinbox, spec)
+            bind_slider(slider, spec)
 
-        spec = specs[ScopeParam.DAC_VALUE]
-        assert isinstance(spec, RangeSpec)
-        self._apply_range_to_spinbox(self.ui.spinDacValue, spec)
-        self._apply_range_to_slider(self.ui.sliderDacValue, spec)
-
-        spec = specs[ScopeParam.PRETRIGGER_SAMPLES]
-        assert isinstance(spec, RangeSpec)
-        self._apply_scaled_range_to_spinbox(
-            self.ui.spinPretrigger, spec, self._SAMPLE_PERIOD_NS
-        )
+        # Timing fields are edited in nanoseconds.
+        for parameter, spinbox, scale in (
+            (ScopeParam.PRETRIGGER_SAMPLES, self.ui.spinPretrigger, self._SAMPLE_PERIOD_NS),
+            (ScopeParam.FRAME_SAMPLES, self.ui.spinFrameSamples, self._SAMPLE_PERIOD_NS),
+            (ScopeParam.FRAME_PERIOD_CYCLES, self.ui.spinFrameGap, self._VIEWER_POINT_PERIOD_NS),
+        ):
+            bind_spinbox(spinbox, range_spec(specs, parameter).scaled(scale), suffix=" ns")
         self.ui.labelPretrigger.setText("Pretrigger:")
-
-        spec = specs[ScopeParam.FRAME_SAMPLES]
-        assert isinstance(spec, RangeSpec)
-        self._apply_scaled_range_to_spinbox(
-            self.ui.spinFrameSamples, spec, self._SAMPLE_PERIOD_NS
-        )
         self.ui.labelFrameSamples.setText("Frame:")
-
-        spec = specs[ScopeParam.FRAME_PERIOD_CYCLES]
-        assert isinstance(spec, RangeSpec)
-        self._apply_scaled_range_to_spinbox(
-            self.ui.spinFrameGap, spec, self._VIEWER_POINT_PERIOD_NS
-        )
         self.ui.labelFrameGap.setText("Periodic gap:")
 
         self.ui.comboTriggerMode.clear()
@@ -302,39 +292,14 @@ class ScopeController(QWidget):
             label = {0: "Any above", 1: "Any below", 2: "Falling edge",
                      3: "Rising edge", 4: "Periodic"}[int(mode)]
             self.ui.comboTriggerMode.addItem(label, int(mode))
-        spec = specs[ScopeParam.EDGE_MODE]
-        assert isinstance(spec, ListSpec)
-        if spec.default in spec.items:
-            self.ui.comboTriggerMode.setCurrentIndex(list(spec.items).index(spec.default))
+        edge_spec = specs[ScopeParam.EDGE_MODE]
+        assert isinstance(edge_spec, ListSpec)
+        if edge_spec.default in edge_spec.items:
+            self.ui.comboTriggerMode.setCurrentIndex(
+                list(edge_spec.items).index(edge_spec.default)
+            )
 
         self.ui.cbDmaEnable.setChecked(False)
-
-    @staticmethod
-    def _apply_range_to_spinbox(spinbox: QSpinBox, spec: RangeSpec) -> None:
-        spinbox.setMinimum(int(spec.min_val))
-        spinbox.setMaximum(int(spec.max_val))
-        spinbox.setSingleStep(int(spec.step) or 1)
-        spinbox.setValue(int(spec.default))
-        bind_numeric_control(spinbox, snap_to_step=True)
-
-    @staticmethod
-    def _apply_scaled_range_to_spinbox(
-        spinbox: QSpinBox, spec: RangeSpec, scale: int
-    ) -> None:
-        """Apply a hardware range after converting its units to nanoseconds."""
-        spinbox.setMinimum(int(spec.min_val) * scale)
-        spinbox.setMaximum(int(spec.max_val) * scale)
-        spinbox.setSingleStep((int(spec.step) or 1) * scale)
-        spinbox.setValue(int(spec.default) * scale)
-        spinbox.setSuffix(" ns")
-        bind_numeric_control(spinbox, snap_to_step=True)
-
-    @staticmethod
-    def _apply_range_to_slider(slider: QSlider, spec: RangeSpec) -> None:
-        slider.setMinimum(int(spec.min_val))
-        slider.setMaximum(int(spec.max_val))
-        slider.setSingleStep(int(spec.step) or 1)
-        slider.setValue(int(spec.default))
 
     # ------------------------------------------------------------------
     # Write defaults to hardware, then read back

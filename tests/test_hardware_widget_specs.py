@@ -64,9 +64,6 @@ def test_scope_widgets_are_driven_from_hardware_specs(qapp: QApplication) -> Non
             specs=PARAMETER_SPECS,
             supported_trigger_modes=lambda: tuple(TriggerMode(i) for i in range(5)),
         ),
-        _apply_range_to_spinbox=ScopeController._apply_range_to_spinbox,
-        _apply_scaled_range_to_spinbox=ScopeController._apply_scaled_range_to_spinbox,
-        _apply_range_to_slider=ScopeController._apply_range_to_slider,
         _SAMPLE_PERIOD_NS=ScopeController._SAMPLE_PERIOD_NS,
         _VIEWER_POINT_PERIOD_NS=ScopeController._VIEWER_POINT_PERIOD_NS,
     )
@@ -645,9 +642,6 @@ def test_mca_widgets_and_enums_match_v101_iio_metadata(qapp: QApplication) -> No
     controller = SimpleNamespace(
         ui=ui,
         _mca=mca,
-        _apply_range_to_spinbox=MCAController._apply_range_to_spinbox,
-        _apply_range_to_slider=MCAController._apply_range_to_slider,
-        _apply_range_to_double_spinbox=MCAController._apply_range_to_double_spinbox,
     )
 
     MCAController._populate_combos(controller)
@@ -841,3 +835,26 @@ def test_psd_widgets_reflect_unsigned_16_bit_event_energy(qapp: QApplication) ->
     assert ui.spinEnergyShift.value() == 0
     assert ui.labelEnergyShift.text() == "Energy shift (bits)"
     assert "display-only" in ui.labelEnergyShift.toolTip()
+
+
+def test_spec_binding_helpers_apply_range_step_default_and_units(qapp: QApplication) -> None:
+    from PySide6.QtWidgets import QDoubleSpinBox, QSlider, QSpinBox
+
+    from nlab.hardware.digitizer.scope import ListSpec, RangeSpec, choice_default, range_spec
+    from nlab.views.spec_binding import bind_double_spinbox, bind_slider, bind_spinbox
+
+    spec = RangeSpec(4, 8188, 4, 1024)
+    spin, slider, double = QSpinBox(), QSlider(), QDoubleSpinBox()
+    bind_spinbox(spin, spec.scaled(2), suffix=" ns")
+    assert (spin.minimum(), spin.maximum(), spin.singleStep(), spin.value()) == (8, 16376, 8, 2048)
+    assert spin.suffix() == " ns"
+    bind_slider(slider, spec, page_step=True)
+    assert (slider.minimum(), slider.maximum(), slider.pageStep(), slider.value()) == (
+        4, 8188, 4, 1024,
+    )
+    bind_double_spinbox(double, RangeSpec(0.0, 2.5, 0.01, 1.0), snap_to_step=False)
+    assert (double.minimum(), double.maximum(), double.value()) == (0.0, 2.5, 1.0)
+    specs = {"range": spec, "choice": ListSpec((0, 1), 1)}
+    assert range_spec(specs, "range") is spec and choice_default(specs, "choice") == 1
+    with pytest.raises(TypeError):
+        range_spec(specs, "choice")

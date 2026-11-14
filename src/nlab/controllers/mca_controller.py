@@ -31,7 +31,7 @@ from nlab.hardware.digitizer.mca import (
     MultiChannelAnalyzer,
 )
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode, McaRunSummary
-from nlab.hardware.digitizer.scope import RangeSpec
+from nlab.hardware.digitizer.scope import RangeSpec, range_spec
 from nlab.ui.ui_mca_view import Ui_MCAView
 from nlab.utils.recording_paths import (
     available_path,
@@ -43,10 +43,11 @@ from nlab.views.mca_roi_history_dialog import (
     DoubleClickableLinearRegionItem,
     McaRoiHistoryDialog,
 )
-from nlab.views.numeric_controls import bind_numeric_control, normalize_numeric_control
+from nlab.views.numeric_controls import normalize_numeric_control
 from nlab.views.panel_status import PanelStatus
 from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE, ModifierZoomViewBox
 from nlab.views.responsive_layout import configure_mca_layout
+from nlab.views.spec_binding import bind_double_spinbox, bind_slider, bind_spinbox
 from nlab.views.time_axis import format_duration_ns, time_axis_scale
 from nlab.workers.base_worker import pause_requests
 from nlab.workers.dma_workers import IIOMcaDmaWorker
@@ -90,6 +91,12 @@ _MCA_TIMING_PARAMETERS = frozenset({
     MCAParam.TRAPEZ_R, MCAParam.TRAPEZ_M, MCAParam.TRAPEZ_E,
     MCAParam.CC_TIME, MCAParam.PSD_ZC_LOW, MCAParam.PSD_ZC_HIGH,
 })
+
+
+def _mca_widget_spec(parameter: MCAParam) -> RangeSpec:
+    """Spec in widget units: timing fields are edited in ns (2 ns per sample)."""
+    spec = range_spec(MCA_PARAMETER_SPECS, parameter)
+    return spec.scaled(2) if parameter in _MCA_TIMING_PARAMETERS else spec
 _THRESHOLD_MARKER_COLOR = "#a66f6f"
 _PRETRIGGER_MARKER_COLOR = "#648b71"
 
@@ -361,14 +368,9 @@ class MCAController(QWidget):
             (MCAParam.TRAPEZ_E, self.ui.spinTrapE, self.ui.sliderTrapE),
         )
         for parameter, spinbox, slider in pairs:
-            spec = MCA_PARAMETER_SPECS[parameter]
-            if parameter in _MCA_TIMING_PARAMETERS:
-                assert isinstance(spec, RangeSpec)
-                spec = RangeSpec(spec.min_val * 2, spec.max_val * 2,
-                                 spec.step * 2, spec.default * 2)
-            assert isinstance(spec, RangeSpec)
-            self._apply_range_to_spinbox(spinbox, spec)
-            self._apply_range_to_slider(slider, spec)
+            spec = _mca_widget_spec(parameter)
+            bind_spinbox(spinbox, spec)
+            bind_slider(slider, spec, page_step=True)
 
         singles = (
             (MCAParam.PILEUP_WINDOW, self.ui.spinPileupWindow),
@@ -380,22 +382,16 @@ class MCAController(QWidget):
             (MCAParam.PSD_ZC_HIGH, self.ui.spinPsdZcHigh),
         )
         for parameter, spinbox in singles:
-            spec = MCA_PARAMETER_SPECS[parameter]
-            if parameter in _MCA_TIMING_PARAMETERS:
-                assert isinstance(spec, RangeSpec)
-                spec = RangeSpec(spec.min_val * 2, spec.max_val * 2,
-                                 spec.step * 2, spec.default * 2)
-            assert isinstance(spec, RangeSpec)
-            self._apply_range_to_spinbox(spinbox, spec)
+            bind_spinbox(spinbox, _mca_widget_spec(parameter))
 
         for parameter, double_spinbox in (
             (MCAParam.CFD_FACTOR, self.ui.spinCfdFactor),
             (MCAParam.TRAPEZ_T, self.ui.spinTrapT),
             (MCAParam.EDGE_DET_COEFF, self.ui.spinEdgeDetCoeff),
         ):
-            spec = MCA_PARAMETER_SPECS[parameter]
-            assert isinstance(spec, RangeSpec)
-            self._apply_range_to_double_spinbox(double_spinbox, spec)
+            spec = range_spec(MCA_PARAMETER_SPECS, parameter)
+            # Integer-step coefficients have a hardware grid; float ones do not.
+            bind_double_spinbox(double_spinbox, spec, snap_to_step=isinstance(spec.step, int))
 
         for control in (
             self.ui.spinPretrigger,
@@ -456,28 +452,6 @@ class MCAController(QWidget):
         self.ui.labelEdgeDetCoeff.setVisible(edge_backed)
         self.ui.spinEdgeDetCoeff.setVisible(edge_backed)
 
-    @staticmethod
-    def _apply_range_to_spinbox(spinbox: QSpinBox, spec: RangeSpec) -> None:
-        spinbox.setRange(int(spec.min_val), int(spec.max_val))
-        spinbox.setSingleStep(int(spec.step) or 1)
-        spinbox.setValue(int(spec.default))
-        bind_numeric_control(spinbox, snap_to_step=True)
-
-    @staticmethod
-    def _apply_range_to_slider(slider: QSlider, spec: RangeSpec) -> None:
-        slider.setRange(int(spec.min_val), int(spec.max_val))
-        slider.setSingleStep(int(spec.step) or 1)
-        slider.setPageStep(max(int(spec.step), 1))
-        slider.setValue(int(spec.default))
-
-    @staticmethod
-    def _apply_range_to_double_spinbox(spinbox: QDoubleSpinBox, spec: RangeSpec) -> None:
-        spinbox.setRange(float(spec.min_val), float(spec.max_val))
-        spinbox.setSingleStep(float(spec.step) or 1.0)
-        spinbox.setValue(float(spec.default))
-        # Integer timings use a hardware grid; floating-point coefficients
-        # retain valid intermediate values and their existing backend encoding.
-        bind_numeric_control(spinbox, snap_to_step=isinstance(spec.step, int))
 
     @staticmethod
     def _snap_integer_control(

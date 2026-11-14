@@ -11,10 +11,10 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QWidget
 
 from nlab.analysis.dose_calibration import PsuDoseCalibrationSnapshot
 from nlab.hardware.digitizer.hv import HV_PARAMETER_SPECS, HVParam, HVSupply
-from nlab.hardware.digitizer.scope import ListSpec, RangeSpec
+from nlab.hardware.digitizer.scope import RangeSpec, choice_default, range_spec
 from nlab.ui.ui_psu_view import Ui_PSUView
-from nlab.views.numeric_controls import bind_numeric_control
 from nlab.views.responsive_layout import configure_psu_layout
+from nlab.views.spec_binding import bind_double_spinbox
 from nlab.workers.base_worker import pause_requests
 from nlab.workers.psu_worker import PSUReadback, PSUWorker
 
@@ -22,23 +22,11 @@ log = logging.getLogger(__name__)
 
 
 def _range_spec(param: HVParam) -> RangeSpec:
-    """Return the numeric range of a continuous HV/IDS parameter.
-
-    ``HV_PARAMETER_SPECS`` is a static table, so a mismatch here is a
-    programming error caught by any test that builds the controller.
-    """
-    spec = HV_PARAMETER_SPECS[param]
-    if not isinstance(spec, RangeSpec):
-        raise TypeError(f"HV parameter {param.name} is not a numeric range")
-    return spec
+    return range_spec(HV_PARAMETER_SPECS, param)
 
 
 def _choice_default(param: HVParam) -> int:
-    """Return the integer default of an enumerated HV/IDS parameter."""
-    spec = HV_PARAMETER_SPECS[param]
-    if not isinstance(spec, ListSpec) or not isinstance(spec.default, int):
-        raise TypeError(f"HV parameter {param.name} is not an integer choice")
-    return spec.default
+    return choice_default(HV_PARAMETER_SPECS, param)
 
 
 class PSUController(QWidget):
@@ -102,7 +90,10 @@ class PSUController(QWidget):
     # ------------------------------------------------------------------
 
     def _apply_parameter_specs(self) -> None:
-        apply = self._apply_range_to_double_spinbox
+        def apply(spinbox: QDoubleSpinBox, spec: RangeSpec) -> None:
+            # Physical HV/SiPM settings accept values between grid steps.
+            bind_double_spinbox(spinbox, spec, snap_to_step=False)
+
         apply(self.ui.spinHvVoltage, _range_spec(HVParam.HV_VOLTAGE))
         apply(self.ui.spinHvCompensCt, _range_spec(HVParam.HV_COMPENS_CT))
         apply(self.ui.spinHvCompensTref, _range_spec(HVParam.HV_COMPENS_TREF))
@@ -111,15 +102,6 @@ class PSUController(QWidget):
             apply(self.ui.spinSipmVoltage, _range_spec(HVParam.SIPM_VOLTAGE))
             apply(self.ui.spinSipmCompensCt, _range_spec(HVParam.SIPM_COMPENS_CT))
             apply(self.ui.spinSipmCompensTref, _range_spec(HVParam.SIPM_COMPENS_TREF))
-
-    @staticmethod
-    def _apply_range_to_double_spinbox(spinbox: QDoubleSpinBox, spec: RangeSpec) -> None:
-        spinbox.setMinimum(spec.min_val)
-        spinbox.setMaximum(spec.max_val)
-        spinbox.setSingleStep(spec.step)
-        spinbox.setValue(spec.default)
-        # These software/physical float settings accept intermediate values.
-        bind_numeric_control(spinbox)
 
     # ------------------------------------------------------------------
     # Write defaults to hardware, then read back

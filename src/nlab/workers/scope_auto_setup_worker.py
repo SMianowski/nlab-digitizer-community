@@ -9,7 +9,14 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QObject, Signal, Slot
 
-from nlab.hardware.digitizer.scope import PARAMETER_SPECS, RangeSpec, Scope, ScopeParam, TriggerMode
+from nlab.hardware.digitizer.scope import (
+    PARAMETER_SPECS,
+    RangeSpec,
+    Scope,
+    ScopeParam,
+    TriggerMode,
+    range_spec,
+)
 
 log = logging.getLogger(__name__)
 
@@ -60,9 +67,7 @@ class _SignalEstimate:
 
 
 def _range_spec(parameter: ScopeParam) -> RangeSpec:
-    spec = PARAMETER_SPECS[parameter]
-    assert isinstance(spec, RangeSpec)
-    return spec
+    return range_spec(PARAMETER_SPECS, parameter)
 
 
 def _estimate_baseline(frames: list[np.ndarray]) -> tuple[float, float]:

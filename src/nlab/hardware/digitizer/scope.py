@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import TypedDict
@@ -30,6 +31,13 @@ class RangeSpec:
             if (val - self.min_val) % self.step != 0:
                 raise ValueError(f"{name}: {val} not aligned to step {self.step}")
 
+    def scaled(self, factor: int) -> RangeSpec:
+        """The same range in other units, e.g. ADC samples to nanoseconds."""
+        return RangeSpec(
+            self.min_val * factor, self.max_val * factor,
+            self.step * factor, self.default * factor,
+        )
+
 
 @dataclass(frozen=True)
 class ListSpec:
@@ -42,6 +50,22 @@ class ListSpec:
 
 
 ParameterSpec = RangeSpec | ListSpec
+
+
+def range_spec[K](specs: Mapping[K, ParameterSpec], key: K) -> RangeSpec:
+    """Look up a numeric parameter; a list spec here is a programming error."""
+    spec = specs[key]
+    if not isinstance(spec, RangeSpec):
+        raise TypeError(f"parameter {key!r} is not a numeric range")
+    return spec
+
+
+def choice_default[K](specs: Mapping[K, ParameterSpec], key: K) -> int:
+    """The integer default of an enumerated parameter."""
+    spec = specs[key]
+    if not isinstance(spec, ListSpec) or not isinstance(spec.default, int):
+        raise TypeError(f"parameter {key!r} is not an integer choice")
+    return spec.default
 
 
 # ---------------------------------------------------------------------------

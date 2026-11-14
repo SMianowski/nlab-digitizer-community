@@ -24,8 +24,8 @@ from nlab.hardware.digitizer.scope import (
     PARAMETER_SPECS,
     SCOPE_ADC_SAMPLE_PERIOD_NS,
     SCOPE_DATAPATH_CLOCK_PERIOD_NS,
-    RangeSpec,
     ScopeParam,
+    range_spec,
 )
 from nlab.ui.ui_current_monitor_view import Ui_CurrentMonitorView
 from nlab.utils.recording_paths import measurement_folder, unique_recording_path
@@ -37,6 +37,7 @@ from nlab.views.numeric_controls import (
 )
 from nlab.views.panel_status import PanelStatus
 from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE
+from nlab.views.spec_binding import bind_spinbox
 from nlab.views.time_axis import time_axis_scale
 from nlab.workers.current_monitor_worker import (
     CurrentMonitorWorker,
@@ -123,12 +124,7 @@ class CurrentMonitorController(QWidget):
         self.status = PanelStatus(self, "Monitor stopped.")
         bind_numeric_control(self.ui.spinDmaGap, snap_to_step=True)
         self.ui.spinDmaGap.setLocale(QLocale.c())
-        frame_spec = PARAMETER_SPECS[ScopeParam.FRAME_SAMPLES]
-        assert isinstance(frame_spec, RangeSpec)
-        self.ui.spinSumSamples.setRange(int(frame_spec.min_val), int(frame_spec.max_val))
-        self.ui.spinSumSamples.setSingleStep(int(frame_spec.step))
-        self.ui.spinSumSamples.setValue(int(frame_spec.default))
-        bind_numeric_control(self.ui.spinSumSamples, snap_to_step=True)
+        bind_spinbox(self.ui.spinSumSamples, range_spec(PARAMETER_SPECS, ScopeParam.FRAME_SAMPLES))
         self.ui.sumTimingControls.setProperty("nlabHelpTopic", "scope-sums")
         self.ui.sumControls.setProperty("nlabHelpTopic", "scope-sums")
         self._setup_plot()
