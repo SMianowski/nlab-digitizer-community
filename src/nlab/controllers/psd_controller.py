@@ -55,7 +55,7 @@ class PSDController(QWidget):
         self._session_replay_render_pending = False
 
         self.ui = Ui_PSDView()
-        self.ui.setupUi(self)  # type: ignore[no-untyped-call]
+        self.ui.setupUi(self)
         self.ui.comboMatrixScale.setItemData(0, "log")
         self.ui.comboMatrixScale.setItemData(1, "linear")
         self.status = PanelStatus(self, self._capture_note)

@@ -5,7 +5,7 @@ import logging
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QPlainTextEdit
+from PySide6.QtWidgets import QPlainTextEdit, QWidget
 
 
 class _LogEmitter(QObject):
@@ -52,7 +52,7 @@ class LogConsole(QPlainTextEdit):
         logging.CRITICAL: "#ff6060",
     }
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setReadOnly(True)
         self.setMaximumBlockCount(5_000)

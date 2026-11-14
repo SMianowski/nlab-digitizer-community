@@ -2322,7 +2322,7 @@ class ScopeController(QWidget):
     # ------------------------------------------------------------------
 
     def _generate_filepath(self) -> Path:
-        folder = Path(QSettings().value("dma/save_folder", "measurements"))
+        folder = Path(str(QSettings().value("dma/save_folder", "measurements")))
         folder.mkdir(parents=True, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S")
         self._dma_counter += 1

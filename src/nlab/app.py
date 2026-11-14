@@ -506,9 +506,9 @@ class MainAppWindow(QMainWindow):
 
     def _restore_developer_settings(self) -> None:
         settings = QSettings()
-        show_log = settings.value(_KEY_SHOW_LOG, False, type=bool)
-        debug_mode = settings.value(_KEY_DEBUG_MODE, False, type=bool)
-        show_roi = settings.value(_KEY_SHOW_ROI, False, type=bool)
+        show_log = cast(bool, settings.value(_KEY_SHOW_LOG, False, type=bool))
+        debug_mode = cast(bool, settings.value(_KEY_DEBUG_MODE, False, type=bool))
+        show_roi = cast(bool, settings.value(_KEY_SHOW_ROI, False, type=bool))
         differential_histogram = cast(
             bool,
             settings.value(
@@ -517,7 +517,7 @@ class MainAppWindow(QMainWindow):
                 type=bool,
             ),
         )
-        log_y = settings.value(_KEY_LOG_Y, False, type=bool)
+        log_y = cast(bool, settings.value(_KEY_LOG_Y, False, type=bool))
         scope_distribution = cast(
             bool, settings.value(_KEY_SCOPE_DISTRIBUTION, False, type=bool)
         )
@@ -759,7 +759,7 @@ class MainAppWindow(QMainWindow):
         ]
         saved_states = getattr(self, "_replay_action_enabled_states", None)
         if active and saved_states is None:
-            self._replay_action_enabled_states = {
+            self._replay_action_enabled_states: dict[str, bool] | None = {
                 action.objectName(): action.isEnabled() for action in actions
             }
             for action in actions:
@@ -1005,8 +1005,8 @@ class MainAppWindow(QMainWindow):
         if process is None:
             return
 
-        stdout = process.readAllStandardOutput().data().decode(errors="replace").strip()
-        stderr = process.readAllStandardError().data().decode(errors="replace").strip()
+        stdout = bytes(process.readAllStandardOutput().data()).decode(errors="replace").strip()
+        stderr = bytes(process.readAllStandardError().data()).decode(errors="replace").strip()
         phase = self._board_power_phase
         command = self._board_power_command
         ssh_program = process.program()

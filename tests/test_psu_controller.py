@@ -72,6 +72,97 @@ def test_hv_voltage_cannot_step_below_minimum(
     backend.set_hv_voltage.assert_called_once_with(100.0)
 
 
+def _sipm_backend() -> MagicMock:
+    backend = MagicMock(spec=IDSBackend)
+    backend.get_sipm_overload.return_value = 0
+    for name in (
+        "get_hv_adc_voltage",
+        "get_hv_compens_output",
+        "get_temp_analog",
+        "get_temp_digital",
+        "get_ads_temp",
+        "get_sipm_adc_voltage",
+        "get_sipm_adc_current",
+        "get_sipm_compens_output",
+    ):
+        getattr(backend, name).return_value = 30.0
+    backend.get_temp_digital_status.return_value = 1
+    return backend
+
+
+def test_construction_sends_spec_defaults(qtbot: QtBot) -> None:
+    backend = _sipm_backend()
+    controller = PSUController(HVSupply(backend))
+    qtbot.addWidget(controller)
+
+    backend.set_hv_voltage.assert_called_once_with(100.0)
+    backend.set_hv_compens_ct.assert_called_once_with(0.0)
+    backend.set_hv_compens_tref.assert_called_once_with(20.0)
+    backend.set_hv_compens_mode.assert_called_once_with(0)
+    backend.set_temp_digital_enable.assert_called_once_with(0)
+    backend.set_sipm_enable.assert_called_once_with(0)
+    backend.set_sipm_voltage.assert_called_once_with(30.0)
+    backend.set_sipm_compens_ct.assert_called_once_with(0.0)
+    backend.set_sipm_compens_tref.assert_called_once_with(20.0)
+    backend.set_sipm_compens_mode.assert_called_once_with(0)
+
+
+def _edit_every_ids_control(controller: PSUController) -> None:
+    ui = controller.ui
+    ui.cbSipmEnable.setChecked(True)
+    ui.comboSipmCompensMode.setCurrentIndex(2)
+    ui.spinSipmCompensCt.setValue(0.05)
+    ui.spinSipmCompensCt.editingFinished.emit()
+    ui.spinSipmCompensTref.setValue(25.0)
+    ui.spinSipmCompensTref.editingFinished.emit()
+    ui.comboHvCompensMode.setCurrentIndex(1)
+    ui.spinHvCompensCt.setValue(-0.03)
+    ui.spinHvCompensCt.editingFinished.emit()
+    ui.spinHvCompensTref.setValue(30.0)
+    ui.spinHvCompensTref.editingFinished.emit()
+    ui.comboTempDigitalEnable.setCurrentIndex(1)
+
+
+def test_ids_controls_write_their_setting(qtbot: QtBot) -> None:
+    backend = _sipm_backend()
+    controller = PSUController(HVSupply(backend))
+    qtbot.addWidget(controller)
+    backend.reset_mock()
+
+    _edit_every_ids_control(controller)
+
+    backend.set_sipm_enable.assert_called_once_with(1)
+    backend.set_sipm_compens_mode.assert_called_once_with(2)
+    backend.set_sipm_compens_ct.assert_called_once_with(pytest.approx(0.05))
+    backend.set_sipm_compens_tref.assert_called_once_with(pytest.approx(25.0))
+    backend.set_hv_compens_mode.assert_called_once_with(1)
+    backend.set_hv_compens_ct.assert_called_once_with(pytest.approx(-0.03))
+    backend.set_hv_compens_tref.assert_called_once_with(pytest.approx(30.0))
+    backend.set_temp_digital_enable.assert_called_once_with(1)
+
+
+def test_replay_interlock_blocks_ids_control_writes(qtbot: QtBot) -> None:
+    backend = _sipm_backend()
+    controller = PSUController(HVSupply(backend))
+    qtbot.addWidget(controller)
+    controller.set_replay_hardware_interlock(True)
+    backend.reset_mock()
+
+    _edit_every_ids_control(controller)
+
+    for name in (
+        "set_sipm_enable",
+        "set_sipm_compens_mode",
+        "set_sipm_compens_ct",
+        "set_sipm_compens_tref",
+        "set_hv_compens_mode",
+        "set_hv_compens_ct",
+        "set_hv_compens_tref",
+        "set_temp_digital_enable",
+    ):
+        getattr(backend, name).assert_not_called()
+
+
 @pytest.mark.parametrize("voltage", [0.0, 99.9, 1250.1])
 def test_hv_api_rejects_voltage_outside_operating_range(voltage: float) -> None:
     backend = MagicMock(spec=IDSBackend)

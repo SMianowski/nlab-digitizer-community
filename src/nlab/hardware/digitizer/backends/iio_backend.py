@@ -1017,7 +1017,8 @@ class IIODigitizerBackend(DigitizerBackend):
         )
 
     def _attr_get(self, name: str) -> str:
-        return self._scope.attrs[name].value
+        value: str = self._scope.attrs[name].value
+        return value
 
     def _attr_set(self, name: str, value: str) -> None:
         self._scope.attrs[name].value = value
@@ -1032,7 +1033,8 @@ class IIODigitizerBackend(DigitizerBackend):
     # either context; see scope_dma_active()'s docstring.
 
     def _dma_attr_get(self, name: str) -> str:
-        return self._dma_scope.attrs[name].value
+        value: str = self._dma_scope.attrs[name].value
+        return value
 
     def _dma_attr_set(self, name: str, value: str) -> None:
         self._dma_scope.attrs[name].value = value
@@ -1062,7 +1064,8 @@ class IIODigitizerBackend(DigitizerBackend):
                 f"no {_PULSE_PROCESSOR_DEVICE_NAME} device bound -- pulse-"
                 "processor core not present on this channel's firmware"
             )
-        return self._pp.attrs[name].value
+        value: str = self._pp.attrs[name].value
+        return value
 
     def _pp_attr_set(self, name: str, value: str) -> None:
         if self._pp is None:
@@ -1089,7 +1092,8 @@ class IIODigitizerBackend(DigitizerBackend):
                 f"no {_INPUT_FILTER_DEVICE_NAME} device bound -- input-"
                 "filter core not present on this channel's firmware"
             )
-        return self._input_filter.attrs[name].value
+        value: str = self._input_filter.attrs[name].value
+        return value
 
     def _if_attr_set(self, name: str, value: str) -> None:
         if self._input_filter is None:
@@ -1117,7 +1121,8 @@ class IIODigitizerBackend(DigitizerBackend):
         self._sync_trigger.attrs[name].value = value
 
     def _mca_pp_attr_get(self, name: str) -> str:
-        return self._require_mca_pp().attrs[name].value
+        value: str = self._require_mca_pp().attrs[name].value
+        return value
 
     def _require_mca_pp(self) -> iio.Device:
         """Narrows self._mca_pp from `iio.Device | None` to `iio.Device`
@@ -1461,7 +1466,8 @@ class IIODigitizerBackend(DigitizerBackend):
         timeout_count = 0
         while True:
             try:
-                return iio._buffer_refill(buf._buffer)
+                nbytes: int = iio._buffer_refill(buf._buffer)
+                return nbytes
             except OSError as exc:
                 if (
                     exc.errno not in _LIBIIO_TIMEOUT_ERRNOS
@@ -2114,7 +2120,12 @@ class IIODigitizerBackend(DigitizerBackend):
         )
 
     @staticmethod
-    def _retry_errno(fn, errnos: tuple[int, ...], attempts: int = 10, delay_s: float = 0.02):
+    def _retry_errno[T](
+        fn: Callable[[], T],
+        errnos: tuple[int, ...],
+        attempts: int = 10,
+        delay_s: float = 0.02,
+    ) -> T:
         """Retry fn() briefly on any of the given errno(s), returning its
         result. Two known transient windows on this driver use this:
 
@@ -2139,8 +2150,11 @@ class IIODigitizerBackend(DigitizerBackend):
                 if e.errno not in errnos or attempt == attempts - 1:
                     raise
                 time.sleep(delay_s)
+        raise ValueError(f"attempts must be >= 1, got {attempts}")
 
-    def _retry_ebusy(self, fn, attempts: int = 10, delay_s: float = 0.02) -> None:
+    def _retry_ebusy(
+        self, fn: Callable[[], object], attempts: int = 10, delay_s: float = 0.02
+    ) -> None:
         self._retry_errno(fn, (16,), attempts, delay_s)
 
     def get_dac_value(self) -> int:
@@ -2575,7 +2589,7 @@ class IIODigitizerBackend(DigitizerBackend):
             # A socket/protocol error makes the batch boundary indeterminate;
             # IiodScopeStream marks itself failed and must never be retried.
             return self._refill_scope_buffer(buf)
-        return self._retry_errno(  # type: ignore[no-any-return]
+        return self._retry_errno(
             lambda: self._refill_scope_buffer(buf), (22,)
         )
 

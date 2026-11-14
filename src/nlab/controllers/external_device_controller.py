@@ -32,7 +32,7 @@ _CURRENT_TO_UA = {"A": 1e6, "mA": 1e3, "uA": 1.0, "µA": 1.0, "μA": 1.0}
 
 
 def _is_boolean_spec(spec: RegisterSpec) -> bool:
-    return spec.scale == 1.0 and spec.min == 0 and spec.max == 1
+    return bool(spec.scale == 1.0 and spec.min == 0 and spec.max == 1)
 
 
 def _is_service_register(name: str) -> bool:

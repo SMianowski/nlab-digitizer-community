@@ -140,9 +140,11 @@ QT_QPA_PLATFORM=offscreen uv run pytest
 
 On PowerShell, set `$env:QT_QPA_PLATFORM = "offscreen"` before running pytest.
 
-Use focused tests and focused Ruff/mypy checks for changed modules. The repository has
-pre-existing global lint and strict-mypy debt, so unrelated findings are not a reason to
-rewrite neighboring code.
+`uv run ruff check .` and `uv run mypy src/nlab` (strict) pass and are blocking in GitHub
+CI; keep them clean. Generated `src/nlab/ui/` modules and the captured walkthrough
+notebooks' style are excluded in `pyproject.toml`. Fix new findings in the code you touch
+rather than adding `# type: ignore` or `noqa`, and keep unrelated cleanups out of feature
+changes.
 
 ## Live hardware verification
 

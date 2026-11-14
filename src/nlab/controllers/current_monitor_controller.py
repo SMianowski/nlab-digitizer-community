@@ -114,7 +114,7 @@ class CurrentMonitorController(QWidget):
         self._session_replay_active = False
 
         self.ui = Ui_CurrentMonitorView()
-        self.ui.setupUi(self)  # type: ignore[no-untyped-call]
+        self.ui.setupUi(self)
         if self._sum_supported():
             self.ui.comboMode.addItem("Periodic sums")
         self.status = PanelStatus(self, "Monitor stopped.")

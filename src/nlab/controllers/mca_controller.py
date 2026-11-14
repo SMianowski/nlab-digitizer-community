@@ -758,7 +758,7 @@ class MCAController(QWidget):
         self._setup_debug_markers()
         self._update_debug_time_axis()
 
-    def _on_debug_legend_sample_clicked(self, item: object) -> None:
+    def _on_debug_legend_sample_clicked(self, item: pg.GraphicsObject) -> None:
         if item is self._debug_cc_guide:
             # pyqtgraph toggles the item before emitting sigSampleClicked.
             # Remember that explicit choice independently of CC availability.
@@ -1575,6 +1575,10 @@ class MCAController(QWidget):
     # Signal wiring
     # ------------------------------------------------------------------
 
+    def _on_pulse_polarity_changed(self, index: int) -> None:
+        log.debug("MCA ch%d: polarity=%d", self._channel, index)
+        self._commit_hardware_setting(lambda: self._mca.set_pulse_polarity(index))
+
     def _commit_hardware_setting(self, write: Callable[[], None]) -> None:
         """Surface rejected GUI edits without leaking exceptions out of Qt slots."""
         try:
@@ -1672,12 +1676,7 @@ class MCAController(QWidget):
 
     def _connect_signals(self) -> None:
         self.ui.btnRecover.clicked.connect(self._on_acknowledge_recovery)
-        self.ui.comboPulsePolarity.currentIndexChanged.connect(
-            lambda i: (
-                log.debug("MCA ch%d: polarity=%d", self._channel, i),
-                self._commit_hardware_setting(lambda: self._mca.set_pulse_polarity(i)),
-            )
-        )
+        self.ui.comboPulsePolarity.currentIndexChanged.connect(self._on_pulse_polarity_changed)
         self.ui.comboBaseline.currentIndexChanged.connect(
             lambda i: self._commit_hardware_setting(lambda: self._mca.set_baseline_window(i))
         )
@@ -2295,14 +2294,15 @@ class MCAController(QWidget):
             else {}
         )
         if configuration:
-            configuration["measurement"] = {
+            measurement: dict[str, object] = {
                 "kind": "mca_listmode",
                 "channel": self._channel,
                 "output_mode": mode.value,
                 "started_utc": datetime.now(UTC).isoformat(),
             }
             if metadata := getattr(self, "_coincidence_metadata", None):
-                configuration["measurement"]["coincidence"] = metadata
+                measurement["coincidence"] = metadata
+            configuration["measurement"] = measurement
             application = configuration.get("application")
             if isinstance(application, dict):
                 channels = application.get("channels")

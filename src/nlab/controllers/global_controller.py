@@ -58,7 +58,7 @@ class GlobalController(QWidget):
         self._sync = devices[0].mca.sync
 
         self.ui = Ui_GlobalView()
-        self.ui.setupUi(self)  # type: ignore[no-untyped-call]
+        self.ui.setupUi(self)
         configure_global_layout(self, self.ui)
         self.ui.tableDiagnostics.verticalHeader().setVisible(False)
         header = self.ui.tableDiagnostics.horizontalHeader()

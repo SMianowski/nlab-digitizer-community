@@ -11,13 +11,33 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QWidget
 
 from nlab.analysis.dose_calibration import PsuDoseCalibrationSnapshot
 from nlab.hardware.digitizer.hv import HV_PARAMETER_SPECS, HVParam, HVSupply
-from nlab.hardware.digitizer.scope import RangeSpec
+from nlab.hardware.digitizer.scope import ListSpec, RangeSpec
 from nlab.ui.ui_psu_view import Ui_PSUView
 from nlab.views.numeric_controls import bind_numeric_control
 from nlab.views.responsive_layout import configure_psu_layout
 from nlab.workers.psu_worker import PSUReadback, PSUWorker
 
 log = logging.getLogger(__name__)
+
+
+def _range_spec(param: HVParam) -> RangeSpec:
+    """Return the numeric range of a continuous HV/IDS parameter.
+
+    ``HV_PARAMETER_SPECS`` is a static table, so a mismatch here is a
+    programming error caught by any test that builds the controller.
+    """
+    spec = HV_PARAMETER_SPECS[param]
+    if not isinstance(spec, RangeSpec):
+        raise TypeError(f"HV parameter {param.name} is not a numeric range")
+    return spec
+
+
+def _choice_default(param: HVParam) -> int:
+    """Return the integer default of an enumerated HV/IDS parameter."""
+    spec = HV_PARAMETER_SPECS[param]
+    if not isinstance(spec, ListSpec) or not isinstance(spec.default, int):
+        raise TypeError(f"HV parameter {param.name} is not an integer choice")
+    return spec.default
 
 
 class PSUController(QWidget):
@@ -81,27 +101,18 @@ class PSUController(QWidget):
     # ------------------------------------------------------------------
 
     def _apply_parameter_specs(self) -> None:
-        specs = HV_PARAMETER_SPECS
-
-        self._apply_range_to_double_spinbox(self.ui.spinHvVoltage, specs[HVParam.HV_VOLTAGE])
-        self._apply_range_to_double_spinbox(self.ui.spinHvCompensCt, specs[HVParam.HV_COMPENS_CT])
-        self._apply_range_to_double_spinbox(
-            self.ui.spinHvCompensTref, specs[HVParam.HV_COMPENS_TREF]
-        )
+        apply = self._apply_range_to_double_spinbox
+        apply(self.ui.spinHvVoltage, _range_spec(HVParam.HV_VOLTAGE))
+        apply(self.ui.spinHvCompensCt, _range_spec(HVParam.HV_COMPENS_CT))
+        apply(self.ui.spinHvCompensTref, _range_spec(HVParam.HV_COMPENS_TREF))
 
         if self._sipm_available:
-            self._apply_range_to_double_spinbox(
-                self.ui.spinSipmVoltage, specs[HVParam.SIPM_VOLTAGE]
-            )
-            self._apply_range_to_double_spinbox(
-                self.ui.spinSipmCompensCt, specs[HVParam.SIPM_COMPENS_CT]
-            )
-            self._apply_range_to_double_spinbox(
-                self.ui.spinSipmCompensTref, specs[HVParam.SIPM_COMPENS_TREF]
-            )
+            apply(self.ui.spinSipmVoltage, _range_spec(HVParam.SIPM_VOLTAGE))
+            apply(self.ui.spinSipmCompensCt, _range_spec(HVParam.SIPM_COMPENS_CT))
+            apply(self.ui.spinSipmCompensTref, _range_spec(HVParam.SIPM_COMPENS_TREF))
 
     @staticmethod
-    def _apply_range_to_double_spinbox(spinbox, spec: RangeSpec) -> None:
+    def _apply_range_to_double_spinbox(spinbox: QDoubleSpinBox, spec: RangeSpec) -> None:
         spinbox.setMinimum(spec.min_val)
         spinbox.setMaximum(spec.max_val)
         spinbox.setSingleStep(spec.step)
@@ -114,19 +125,18 @@ class PSUController(QWidget):
     # ------------------------------------------------------------------
 
     def _send_defaults(self) -> None:
-        specs = HV_PARAMETER_SPECS
         try:
-            self.hv.set_hv_voltage(specs[HVParam.HV_VOLTAGE].default)
-            self.hv.set_hv_compens_ct(specs[HVParam.HV_COMPENS_CT].default)
-            self.hv.set_hv_compens_tref(specs[HVParam.HV_COMPENS_TREF].default)
-            self.hv.set_hv_compens_mode(specs[HVParam.HV_COMPENS_MODE].default)
-            self.hv.set_temp_digital_enable(specs[HVParam.TEMP_DIGITAL_ENABLE].default)
+            self.hv.set_hv_voltage(_range_spec(HVParam.HV_VOLTAGE).default)
+            self.hv.set_hv_compens_ct(_range_spec(HVParam.HV_COMPENS_CT).default)
+            self.hv.set_hv_compens_tref(_range_spec(HVParam.HV_COMPENS_TREF).default)
+            self.hv.set_hv_compens_mode(_choice_default(HVParam.HV_COMPENS_MODE))
+            self.hv.set_temp_digital_enable(_choice_default(HVParam.TEMP_DIGITAL_ENABLE))
             if self._sipm_available:
-                self.hv.set_sipm_enable(specs[HVParam.SIPM_ENABLE].default)
-                self.hv.set_sipm_voltage(specs[HVParam.SIPM_VOLTAGE].default)
-                self.hv.set_sipm_compens_ct(specs[HVParam.SIPM_COMPENS_CT].default)
-                self.hv.set_sipm_compens_tref(specs[HVParam.SIPM_COMPENS_TREF].default)
-                self.hv.set_sipm_compens_mode(specs[HVParam.SIPM_COMPENS_MODE].default)
+                self.hv.set_sipm_enable(_choice_default(HVParam.SIPM_ENABLE))
+                self.hv.set_sipm_voltage(_range_spec(HVParam.SIPM_VOLTAGE).default)
+                self.hv.set_sipm_compens_ct(_range_spec(HVParam.SIPM_COMPENS_CT).default)
+                self.hv.set_sipm_compens_tref(_range_spec(HVParam.SIPM_COMPENS_TREF).default)
+                self.hv.set_sipm_compens_mode(_choice_default(HVParam.SIPM_COMPENS_MODE))
         except Exception:
             log.exception("Failed to send HV defaults")
 
@@ -183,84 +193,54 @@ class PSUController(QWidget):
     # ------------------------------------------------------------------
 
     def _connect_signals(self) -> None:
+        ui = self.ui
+        hv = self.hv
+        write = self._write_hv_setting
         if self._sipm_available:
-            self.ui.cbSipmEnable.toggled.connect(
-                lambda v: self._apply_hardware_write(
-                    lambda: (
-                        log.debug("PSU: sipm_enable=%s", v),
-                        self.hv.set_sipm_enable(int(v)),
-                    )
+            ui.cbSipmEnable.toggled.connect(
+                lambda v: write(
+                    "PSU: sipm_enable=%s", v, lambda on: hv.set_sipm_enable(int(on))
                 )
             )
-            self.ui.spinSipmVoltage.editingFinished.connect(self._on_sipm_voltage_changed)
-            self.ui.comboSipmCompensMode.currentIndexChanged.connect(
-                lambda i: self._apply_hardware_write(
-                    lambda: (
-                        log.debug("PSU: sipm_compens_mode=%d", i),
-                        self.hv.set_sipm_compens_mode(i),
-                    )
+            ui.spinSipmVoltage.editingFinished.connect(self._on_sipm_voltage_changed)
+            ui.comboSipmCompensMode.currentIndexChanged.connect(
+                lambda i: write("PSU: sipm_compens_mode=%d", i, hv.set_sipm_compens_mode)
+            )
+            ui.spinSipmCompensCt.editingFinished.connect(
+                lambda: write(
+                    "PSU: sipm_compens_ct=%.4f",
+                    ui.spinSipmCompensCt.value(),
+                    hv.set_sipm_compens_ct,
                 )
             )
-            self.ui.spinSipmCompensCt.editingFinished.connect(
-                lambda: self._apply_hardware_write(
-                    lambda: (
-                        log.debug(
-                            "PSU: sipm_compens_ct=%.4f",
-                            self.ui.spinSipmCompensCt.value(),
-                        ),
-                        self.hv.set_sipm_compens_ct(self.ui.spinSipmCompensCt.value()),
-                    )
-                )
-            )
-            self.ui.spinSipmCompensTref.editingFinished.connect(
-                lambda: self._apply_hardware_write(
-                    lambda: (
-                        log.debug(
-                            "PSU: sipm_compens_tref=%.2f",
-                            self.ui.spinSipmCompensTref.value(),
-                        ),
-                        self.hv.set_sipm_compens_tref(self.ui.spinSipmCompensTref.value()),
-                    )
+            ui.spinSipmCompensTref.editingFinished.connect(
+                lambda: write(
+                    "PSU: sipm_compens_tref=%.2f",
+                    ui.spinSipmCompensTref.value(),
+                    hv.set_sipm_compens_tref,
                 )
             )
 
-        self.ui.spinHvVoltage.editingFinished.connect(self._on_hv_voltage_changed)
+        ui.spinHvVoltage.editingFinished.connect(self._on_hv_voltage_changed)
 
-        self.ui.comboHvCompensMode.currentIndexChanged.connect(
-            lambda i: self._apply_hardware_write(
-                lambda: (
-                    log.debug("PSU: hv_compens_mode=%d", i),
-                    self.hv.set_hv_compens_mode(i),
-                )
+        ui.comboHvCompensMode.currentIndexChanged.connect(
+            lambda i: write("PSU: hv_compens_mode=%d", i, hv.set_hv_compens_mode)
+        )
+        ui.spinHvCompensCt.editingFinished.connect(
+            lambda: write(
+                "PSU: hv_compens_ct=%.4f", ui.spinHvCompensCt.value(), hv.set_hv_compens_ct
             )
         )
-        self.ui.spinHvCompensCt.editingFinished.connect(
-            lambda: self._apply_hardware_write(
-                lambda: (
-                    log.debug("PSU: hv_compens_ct=%.4f", self.ui.spinHvCompensCt.value()),
-                    self.hv.set_hv_compens_ct(self.ui.spinHvCompensCt.value()),
-                )
-            )
-        )
-        self.ui.spinHvCompensTref.editingFinished.connect(
-            lambda: self._apply_hardware_write(
-                lambda: (
-                    log.debug(
-                        "PSU: hv_compens_tref=%.2f",
-                        self.ui.spinHvCompensTref.value(),
-                    ),
-                    self.hv.set_hv_compens_tref(self.ui.spinHvCompensTref.value()),
-                )
+        ui.spinHvCompensTref.editingFinished.connect(
+            lambda: write(
+                "PSU: hv_compens_tref=%.2f",
+                ui.spinHvCompensTref.value(),
+                hv.set_hv_compens_tref,
             )
         )
 
-        self.ui.comboTempDigitalEnable.currentIndexChanged.connect(
-            lambda i: self._apply_hardware_write(
-                lambda: (
-                    log.debug("PSU: temp_digital_enable=%d", i),
-                    self.hv.set_temp_digital_enable(i),
-                )
-            )
+        ui.comboTempDigitalEnable.currentIndexChanged.connect(
+            lambda i: write("PSU: temp_digital_enable=%d", i, hv.set_temp_digital_enable)
         )
 
         self.ui.btnStartMonitor.clicked.connect(self._on_start_monitor)
@@ -271,6 +251,15 @@ class PSUController(QWidget):
         if self._replay_hardware_interlocked:
             return
         write()
+
+    def _write_hv_setting[V](self, message: str, value: V, setter: Callable[[V], None]) -> None:
+        """Log and apply one GUI-driven IDS write unless replay owns the hardware."""
+
+        def write() -> None:
+            log.debug(message, value)
+            setter(value)
+
+        self._apply_hardware_write(write)
 
     def set_replay_hardware_interlock(
         self,

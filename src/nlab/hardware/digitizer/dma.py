@@ -28,7 +28,11 @@ from nlab.hardware.digitizer.iio_listmode import (
     cfd_interpolation_samples,
 )
 from nlab.hardware.digitizer.mca_capture import McaCaptureWriter, McaDmaOutputMode
-from nlab.hardware.digitizer.scope_sums import ScopeSumBackend, ScopeSumCapture
+from nlab.hardware.digitizer.scope_sums import (
+    ScopeSumBackend,
+    ScopeSumCapture,
+    ScopeSumGeometry,
+)
 
 if TYPE_CHECKING:
     from nlab.hardware.digitizer.current_monitor import ScopeCurrentAccumulator
@@ -39,7 +43,9 @@ class _IIOScopeBackend(ScopeSumBackend, Protocol):
 
     def get_frame_samples(self) -> int: ...
 
-    def get_scope_dma_geometry(self) -> ScopeDmaGeometry: ...
+    # Periodic-sum mode 5 advertises ScopeSumGeometry; capture_geometry()
+    # rejects it so structured sums never reach waveform/NDMA v1 consumers.
+    def get_scope_dma_geometry(self) -> ScopeDmaGeometry | ScopeSumGeometry: ...
 
     def read_dma_raw_frame(self) -> bytes: ...
 

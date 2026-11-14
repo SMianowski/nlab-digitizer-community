@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overwrite confirmation.
 - Make the PSD offset-model regression test independent of Qt timer scheduling
   while preserving coverage of continuous-fit model selection.
+- Ruff and strict mypy now pass for the whole repository and the GitHub CI lint
+  step is blocking. Generated Qt modules are excluded from both tools; the shaping
+  accessors' physics names (`get_trapez_R`, `get_crrc2_Cdelay`, ...) are kept as
+  public API. PSU control wiring now uses one logged write helper, with tests for
+  construction defaults, every IDS control write, and the replay interlock.
 
 ## [0.8.5] — 2026-11-13
 

@@ -233,18 +233,21 @@ class HVSupply:
         IDs match hw_def.json "hv" section register ids (101–119).
         Write-only parameters (setters with no readback) are excluded.
         """
+        def entry(param: HVParam, value: int | float) -> HVSettingEntry:
+            return HVSettingEntry(id=int(param), value=value)
+
         entries = [
-            HVSettingEntry(id=int(HVParam.HV_ADC_VOLTAGE),      value=self.get_hv_adc_voltage()),
-            HVSettingEntry(id=int(HVParam.HV_COMPENS_OUTPUT),    value=self.get_hv_compens_output()),
-            HVSettingEntry(id=int(HVParam.TEMP_ANALOG),         value=self.get_temp_analog()),
-            HVSettingEntry(id=int(HVParam.TEMP_DIGITAL_STATUS), value=self.get_temp_digital_status()),
-            HVSettingEntry(id=int(HVParam.TEMP_DIGITAL),        value=self.get_temp_digital()),
+            entry(HVParam.HV_ADC_VOLTAGE, self.get_hv_adc_voltage()),
+            entry(HVParam.HV_COMPENS_OUTPUT, self.get_hv_compens_output()),
+            entry(HVParam.TEMP_ANALOG, self.get_temp_analog()),
+            entry(HVParam.TEMP_DIGITAL_STATUS, self.get_temp_digital_status()),
+            entry(HVParam.TEMP_DIGITAL, self.get_temp_digital()),
         ]
         if self.sipm_available():
             entries.extend([
-                HVSettingEntry(id=int(HVParam.SIPM_ADC_VOLTAGE),    value=self._b.get_sipm_adc_voltage()),
-                HVSettingEntry(id=int(HVParam.SIPM_ADC_CURRENT),    value=self._b.get_sipm_adc_current()),
-                HVSettingEntry(id=int(HVParam.SIPM_OVERLOAD),       value=self._b.get_sipm_overload()),
-                HVSettingEntry(id=int(HVParam.SIPM_COMPENS_OUTPUT),  value=self._b.get_sipm_compens_output()),
+                entry(HVParam.SIPM_ADC_VOLTAGE, self._b.get_sipm_adc_voltage()),
+                entry(HVParam.SIPM_ADC_CURRENT, self._b.get_sipm_adc_current()),
+                entry(HVParam.SIPM_OVERLOAD, self._b.get_sipm_overload()),
+                entry(HVParam.SIPM_COMPENS_OUTPUT, self._b.get_sipm_compens_output()),
             ])
         return entries

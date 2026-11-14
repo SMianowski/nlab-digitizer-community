@@ -77,7 +77,8 @@ class _OfflineDigitizerBackend:
         return True
 
     def acquisition_profile(self) -> dict[str, object]:
-        return dict(self._values.get("acquisition_profile", {}))
+        profile = cast(dict[str, object], self._values.get("acquisition_profile", {}))
+        return dict(profile)
 
     def apply_acquisition_profile(self, values: dict[str, object]) -> None:
         from .acquisition_profile import AcquisitionProfile

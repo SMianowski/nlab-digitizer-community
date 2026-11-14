@@ -81,7 +81,6 @@ jobs:
         run: ${{ matrix.venv-python }} scripts/build_ui.py
 
       - name: Lint
-        continue-on-error: true
         run: |
           ${{ matrix.venv-python }} -m ruff check .
           ${{ matrix.venv-python }} -m mypy src/nlab

@@ -52,7 +52,7 @@ class ConnectionDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._ui = Ui_ConnectionDialog()
-        self._ui.setupUi(self)  # type: ignore[no-untyped-call]
+        self._ui.setupUi(self)
         self._ui.comboIp.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._ui.buttonBox.button(QDialogButtonBox.StandardButton.Ok).setText("Connect")
         self._ui.buttonBox.accepted.connect(self._on_accept)

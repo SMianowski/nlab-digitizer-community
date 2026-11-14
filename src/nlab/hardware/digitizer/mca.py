@@ -788,32 +788,35 @@ class MultiChannelAnalyzer:
         optional raw 1/C uses internal ID 203; derived read-only 1/R uses 204.
         LP coefficients (LP_COEFFS) are returned as list[int] via .tolist().
         """
+        f = self.filters
         settings = [
             MCASettingEntry(id=int(MCAParam.PULSE_POLARITY), value=self.get_pulse_polarity()),
             MCASettingEntry(id=int(MCAParam.TRIGGER_LEVEL), value=self.get_trigger_level()),
-            MCASettingEntry(id=int(MCAParam.PRETRIGGER_SAMPLES), value=self.get_pretrigger_samples()),
+            MCASettingEntry(
+                id=int(MCAParam.PRETRIGGER_SAMPLES), value=self.get_pretrigger_samples()
+            ),
             MCASettingEntry(id=int(MCAParam.FRAME_SAMPLES), value=self.get_frame_samples()),
             MCASettingEntry(id=int(MCAParam.ENERGY_BIN), value=self.get_energy_bin()),
             MCASettingEntry(id=int(MCAParam.TRG_SOURCE), value=self.get_trg_source()),
             MCASettingEntry(id=int(MCAParam.BASELINE_WINDOW), value=self.get_baseline_window()),
-            MCASettingEntry(id=int(MCAParam.CFD_FACTOR), value=self.filters.cfd.get_factor()),
-            MCASettingEntry(id=int(MCAParam.CFD_DELAY), value=self.filters.cfd.get_delay()),
-            MCASettingEntry(id=int(MCAParam.CRRC2_CDELAY), value=self.filters.crrc2.get_Cdelay()),
-            MCASettingEntry(id=int(MCAParam.CRRC2_FDELAY), value=self.filters.crrc2.get_Fdelay()),
-            MCASettingEntry(id=int(MCAParam.CC_ENABLE), value=self.filters.charge_comparison.get_enable()),
-            MCASettingEntry(id=int(MCAParam.CC_TIME), value=self.filters.charge_comparison.get_time()),
-            MCASettingEntry(id=int(MCAParam.TRAPEZ_ENABLE), value=self.filters.trapezoid.get_enable()),
-            MCASettingEntry(id=int(MCAParam.TRAPEZ_R), value=self.filters.trapezoid.get_R()),
-            MCASettingEntry(id=int(MCAParam.TRAPEZ_M), value=self.filters.trapezoid.get_M()),
-            MCASettingEntry(id=int(MCAParam.TRAPEZ_T), value=self.filters.trapezoid.get_T()),
-            MCASettingEntry(id=int(MCAParam.TRAPEZ_E), value=self.filters.trapezoid.get_E()),
-            MCASettingEntry(id=int(MCAParam.TRAPEZ_FT), value=self.filters.trapezoid.get_FT()),
+            MCASettingEntry(id=int(MCAParam.CFD_FACTOR), value=f.cfd.get_factor()),
+            MCASettingEntry(id=int(MCAParam.CFD_DELAY), value=f.cfd.get_delay()),
+            MCASettingEntry(id=int(MCAParam.CRRC2_CDELAY), value=f.crrc2.get_Cdelay()),
+            MCASettingEntry(id=int(MCAParam.CRRC2_FDELAY), value=f.crrc2.get_Fdelay()),
+            MCASettingEntry(id=int(MCAParam.CC_ENABLE), value=f.charge_comparison.get_enable()),
+            MCASettingEntry(id=int(MCAParam.CC_TIME), value=f.charge_comparison.get_time()),
+            MCASettingEntry(id=int(MCAParam.TRAPEZ_ENABLE), value=f.trapezoid.get_enable()),
+            MCASettingEntry(id=int(MCAParam.TRAPEZ_R), value=f.trapezoid.get_R()),
+            MCASettingEntry(id=int(MCAParam.TRAPEZ_M), value=f.trapezoid.get_M()),
+            MCASettingEntry(id=int(MCAParam.TRAPEZ_T), value=f.trapezoid.get_T()),
+            MCASettingEntry(id=int(MCAParam.TRAPEZ_E), value=f.trapezoid.get_E()),
+            MCASettingEntry(id=int(MCAParam.TRAPEZ_FT), value=f.trapezoid.get_FT()),
             MCASettingEntry(id=int(MCAParam.TIME_LIMIT), value=self.get_time_limit()),
-            MCASettingEntry(id=int(MCAParam.CRRC2_PZC), value=self.filters.crrc2.get_pzc_coeff()),
-            MCASettingEntry(id=int(MCAParam.LP_COEFFS), value=self.filters.lp.get_coeffs().tolist()),
-            MCASettingEntry(id=int(MCAParam.CFD_ENABLE), value=self.filters.cfd.get_enable()),
-            MCASettingEntry(id=int(MCAParam.CFD_TW_LOW), value=self.filters.cfd.get_time_window_low()),
-            MCASettingEntry(id=int(MCAParam.CFD_TW_HIGH), value=self.filters.cfd.get_time_window_high()),
+            MCASettingEntry(id=int(MCAParam.CRRC2_PZC), value=f.crrc2.get_pzc_coeff()),
+            MCASettingEntry(id=int(MCAParam.LP_COEFFS), value=f.lp.get_coeffs().tolist()),
+            MCASettingEntry(id=int(MCAParam.CFD_ENABLE), value=f.cfd.get_enable()),
+            MCASettingEntry(id=int(MCAParam.CFD_TW_LOW), value=f.cfd.get_time_window_low()),
+            MCASettingEntry(id=int(MCAParam.CFD_TW_HIGH), value=f.cfd.get_time_window_high()),
             MCASettingEntry(id=int(MCAParam.MEM1_SIG_SELECT), value=self.get_mem1_sig_select()),
             MCASettingEntry(id=int(MCAParam.MEM2_SIG_SELECT), value=self.get_mem2_sig_select()),
             MCASettingEntry(id=int(MCAParam.EXT_TRIG_ENABLE), value=self.get_ext_trig_enable()),
@@ -821,19 +824,19 @@ class MultiChannelAnalyzer:
             MCASettingEntry(id=int(MCAParam.EDGE_DET_COEFF), value=self.get_edge_det_coeff()),
             MCASettingEntry(id=int(MCAParam.TEMP_COEFF), value=self.get_temp_coeff()),
             MCASettingEntry(id=int(MCAParam.TEMP_OFFSET), value=self.get_temp_offset()),
-            MCASettingEntry(id=int(MCAParam.PSD_ZC_ENABLE), value=self.filters.psd_zc.get_enable()),
-            MCASettingEntry(id=int(MCAParam.PSD_ZC_MODE), value=self.filters.psd_zc.get_mode()),
-            MCASettingEntry(id=int(MCAParam.PSD_ZC_LOW), value=self.filters.psd_zc.get_time_window_low()),
-            MCASettingEntry(id=int(MCAParam.PSD_ZC_HIGH), value=self.filters.psd_zc.get_time_window_high()),
+            MCASettingEntry(id=int(MCAParam.PSD_ZC_ENABLE), value=f.psd_zc.get_enable()),
+            MCASettingEntry(id=int(MCAParam.PSD_ZC_MODE), value=f.psd_zc.get_mode()),
+            MCASettingEntry(id=int(MCAParam.PSD_ZC_LOW), value=f.psd_zc.get_time_window_low()),
+            MCASettingEntry(id=int(MCAParam.PSD_ZC_HIGH), value=f.psd_zc.get_time_window_high()),
         ]
-        if self.filters.crrc2.supports_reciprocal_raw():
+        if f.crrc2.supports_reciprocal_raw():
             settings.append(MCASettingEntry(
                 id=int(MCAParam.CRRC2_RECIPROCAL),
-                value=self.filters.crrc2.get_reciprocal_raw(),
+                value=f.crrc2.get_reciprocal_raw(),
             ))
-        if self.filters.trapezoid.supports_reciprocal_raw():
+        if f.trapezoid.supports_reciprocal_raw():
             settings.append(MCASettingEntry(
                 id=int(MCAParam.TRAPEZ_RECIPROCAL),
-                value=self.filters.trapezoid.get_reciprocal_raw(),
+                value=f.trapezoid.get_reciprocal_raw(),
             ))
         return settings
