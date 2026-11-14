@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Polling workers (MCA, Power Supply, Global diagnostics and temperature correction,
   Current IIR monitor, external devices) share one thread helper,
   `nlab/workers/worker_thread.py`, for wiring and for the never-terminate join.
+- The System Log console batches records: the handler buffers formatted lines
+  (bounded, oldest dropped with a visible count) and wakes the GUI once per burst; the
+  console appends the batch in one edit block every 50 ms at most and scrolls once.
+  Its undo stack is disabled and its root-logger handler is removed when it closes.
 - The MCA spectrum draws a min/max envelope per pixel column when more than two bins
   share a pixel (`nlab/views/histogram_curve.py`), so peaks and single-bin lines stay
   visible; zoomed in, the exact step histogram is drawn. Offscreen, a 16,384-bin
