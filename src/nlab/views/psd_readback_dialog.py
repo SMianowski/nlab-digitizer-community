@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
 from nlab.analysis.capture_metadata import capture_digitizer_info
 from nlab.analysis.psd import PsdAccumulator
 from nlab.analysis.psd_file import PsdEventFileInfo, inspect_psd_event_file
-from nlab.analysis.psd_report import PsdReportRequest, export_psd_report
 from nlab.help.context import HelpContext
 from nlab.views.help_dialog import HelpDialog
 from nlab.views.offline_psd_plot import OfflinePsdPlot
@@ -347,6 +346,9 @@ class PsdReadbackDialog(QDialog):
         )
 
     def _download_report(self) -> None:
+        # Deferred: matplotlib + reportlab cost ~0.45 s at application start.
+        from nlab.analysis.psd_report import PsdReportRequest, export_psd_report
+
         info = self._source_info
         accumulator = self._last_accumulator
         fit = self.plot.fom_widget.last_fit

@@ -190,9 +190,11 @@ class OfflinePsdPlot(QWidget):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         """Toggle energy-projection log scale only while that plot is hovered."""
+        # Application-wide filter: leave every non-key event immediately.
+        if event.type() != QEvent.Type.KeyPress:
+            return False
         if (
-            event.type() == QEvent.Type.KeyPress
-            and self.isVisible()
+            self.isVisible()
             and self._energy_widget.underMouse()
             and isinstance(event, QKeyEvent)
             and event.key() == Qt.Key.Key_L

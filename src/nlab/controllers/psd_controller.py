@@ -177,9 +177,12 @@ class PSDController(QWidget):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         """Handle the local log shortcut without stealing a global key."""
+        # Application-wide filter: leave every non-key event immediately
+        # (QObject.eventFilter would only return False via a C++ round trip).
+        if event.type() != QEvent.Type.KeyPress:
+            return False
         if (
-            event.type() == QEvent.Type.KeyPress
-            and self.isVisible()
+            self.isVisible()
             and self.ui.plotEnergy.underMouse()
             and isinstance(event, QKeyEvent)
             and event.key() == Qt.Key.Key_L

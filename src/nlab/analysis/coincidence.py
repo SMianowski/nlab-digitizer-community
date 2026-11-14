@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from heapq import merge
 
 import numpy as np
-from scipy.optimize import OptimizeWarning, curve_fit
 
 from nlab.hardware.digitizer.iio_listmode import (
     ADC_SAMPLE_Q,
@@ -204,6 +203,9 @@ def fit_coincidence_peak(
     sigma_guess = max(0.4, 2.0 * bin_width_ns)
     lower = (0.0, max(float(x[0]), peak_center - 2.0), bin_width_ns, 0.0)
     upper = (np.inf, min(float(x[-1]), peak_center + 2.0), PEAK_FIT_HALF_WINDOW_NS, np.inf)
+    # scipy.optimize (~0.3 s) is imported when a fit runs, not at app start.
+    from scipy.optimize import OptimizeWarning, curve_fit
+
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", OptimizeWarning)

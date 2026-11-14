@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock, call
@@ -42,16 +43,43 @@ def test_scan_new_uses_fresh_manager_and_both_remote_ports(
     )
     manager_factory = Mock(return_value=manager)
     monkeypatch.setattr(modbus_devices_module, "DeviceManager", manager_factory)
+    probed: list[tuple[str, int]] = []
+    responders = {5001: [{"device_id": 3}, {"device_id": 7}], 5002: [{"device_id": 1}]}
+
+    def probe(host: str, port: int) -> list[dict[str, int]]:
+        probed.append((host, port))
+        return responders[port]
+
+    monkeypatch.setattr(modbus_devices_module, "scan_remote_modbus_devices", probe)
 
     scan = ExternalDevices.scan_new("board.local")
 
     manager_factory.assert_called_once_with()
+    assert sorted(probed) == [("board.local", 5001), ("board.local", 5002)]
+    # Registration follows port order and re-probes only responding IDs.
     assert manager.scan_remote.call_args_list == [
-        call("board.local", 5001),
-        call("board.local", 5002),
+        call("board.local", 5001, candidate_ids=(3, 7)),
+        call("board.local", 5002, candidate_ids=(1,)),
     ]
     assert scan.devices == tuple(devices)
     assert scan.manager._manager is manager
+
+
+def test_ports_are_probed_concurrently_and_empty_ports_are_not_rescanned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = SimpleNamespace(all_devices=[], scan_remote=Mock(), close_all=Mock())
+    monkeypatch.setattr(modbus_devices_module, "DeviceManager", Mock(return_value=manager))
+    both_probing = threading.Barrier(2, timeout=2)
+
+    def probe(_host: str, _port: int) -> list[dict[str, int]]:
+        both_probing.wait()  # deadlocks (BrokenBarrierError) if ports run serially
+        return []
+
+    monkeypatch.setattr(modbus_devices_module, "scan_remote_modbus_devices", probe)
+
+    assert ExternalDevices.scan_new("board.local").devices == ()
+    manager.scan_remote.assert_not_called()
 
 
 def test_apply_scan_stops_old_pollers_and_rebuilds_external_docks() -> None:

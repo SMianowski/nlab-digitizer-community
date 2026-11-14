@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
 )
 
 from nlab.analysis.capture_metadata import capture_digitizer_info
-from nlab.analysis.psd_report import PsdReportRequest, export_psd_report
 from nlab.analysis.waveform_cluster_export import ClusterFormat
 from nlab.analysis.waveform_file import MappedWaveformFile, WaveformFileIndex, WaveformFrame
 from nlab.analysis.waveform_fom_optimization import (
@@ -1644,6 +1643,9 @@ class WaveformAnalysisDialog(QDialog):
         )
 
     def _download_report(self) -> None:
+        # Deferred: matplotlib + reportlab cost ~0.45 s at application start.
+        from nlab.analysis.psd_report import PsdReportRequest, export_psd_report
+
         index = self._index
         result = self._last_psd_result
         context = self._last_report_context

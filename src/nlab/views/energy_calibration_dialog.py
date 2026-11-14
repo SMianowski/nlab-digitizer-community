@@ -38,11 +38,6 @@ from nlab.analysis.energy_calibration import (
     fit_calibration_peak,
     fit_energy_calibration,
 )
-from nlab.analysis.mca_report import (
-    EnergyCalibrationReportPoint,
-    EnergyCalibrationReportRequest,
-    export_energy_calibration_report,
-)
 from nlab.views.plot_viewbox import ModifierZoomViewBox
 from nlab.views.tooltips import wrap_widget_tooltips
 from nlab.views.workbench_menu import WorkbenchMenuBar
@@ -857,6 +852,13 @@ class EnergyCalibrationDialog(QDialog):
         )
 
     def _download_report(self) -> None:
+        # Deferred: matplotlib + reportlab cost ~0.45 s at application start.
+        from nlab.analysis.mca_report import (
+            EnergyCalibrationReportPoint,
+            EnergyCalibrationReportRequest,
+            export_energy_calibration_report,
+        )
+
         workspace = self._workspace()
         channel = self._channel()
         if workspace is None or workspace.fit is None or channel is None:

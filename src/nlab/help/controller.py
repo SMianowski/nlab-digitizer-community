@@ -19,6 +19,8 @@ _MOUSE_EVENTS = {
     QEvent.Type.Wheel, QEvent.Type.ContextMenu,
     QEvent.Type.TouchBegin, QEvent.Type.TouchUpdate, QEvent.Type.TouchEnd,
 }
+# Events that can change state while help mode is inactive (F1 to enter it).
+_INACTIVE_EVENTS = frozenset({QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress})
 
 
 class HelpController(QObject):
@@ -120,8 +122,14 @@ class HelpController(QObject):
         self._application.removeEventFilter(self)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        if event.type() == QEvent.Type.ApplicationDeactivate:
+        kind = event.type()
+        if kind == QEvent.Type.ApplicationDeactivate:
             self.set_active(False)
+            return False
+        # Application-wide filter: every Qt event of every widget passes here.
+        # While help mode is off only the F1 key events matter, so return
+        # before the parent-chain walk in owns() for everything else.
+        if not self.active and kind not in _INACTIVE_EVENTS:
             return False
         if not isinstance(watched, QWidget):
             return False
@@ -129,7 +137,6 @@ class HelpController(QObject):
             if self.active and event.type() == QEvent.Type.MouseButtonPress:
                 self.set_active(False)
             return False
-        kind = event.type()
         if kind == QEvent.Type.Close:
             self.set_active(False)
             return False

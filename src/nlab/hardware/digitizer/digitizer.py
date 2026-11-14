@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from .acquisition_profile import AcquisitionProfile
@@ -135,11 +136,32 @@ class Digitizer:
         from .backends.iio_backend import IIODigitizerBackend
         from .backends.iio_ids_backend import IIOIDSBackend, IIOIDSUnavailableError
 
-        backend = IIODigitizerBackend(channel, uri, dac_channel=dac_channel, profile=profile)
+        # The DPP and IDS backends open separate IIO contexts and share no
+        # state, so build them concurrently: IDS construction is dominated by
+        # its required HV-feedback probe (~180 ms MCP3564R conversion, live).
+        # Each backend is only handed to its owners after both have finished.
+        ids_pool = (
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"iio-ids-ch{channel}-open")
+            if with_ids
+            else None
+        )
+        ids_future = ids_pool.submit(IIOIDSBackend, channel, uri) if ids_pool else None
+        try:
+            backend = IIODigitizerBackend(channel, uri, dac_channel=dac_channel, profile=profile)
+        except BaseException:
+            if ids_future is not None:
+                try:
+                    ids_future.result().close()
+                except Exception:
+                    pass  # the DPP failure is the error to report
+            raise
+        finally:
+            if ids_pool is not None:
+                ids_pool.shutdown(wait=True)
         ids = None
-        if with_ids:
+        if ids_future is not None:
             try:
-                ids = IIOIDSBackend(channel, uri)
+                ids = ids_future.result()
             except IIOIDSUnavailableError as exc:
                 # Scope and MCA are independent IIO cores. A firmware image
                 # may omit an IDS converter or expose an unusable HV readback;
@@ -150,6 +172,9 @@ class Digitizer:
                     channel,
                     exc,
                 )
+            except BaseException:
+                backend.close()
+                raise
         scope_dma = IIOScopeDmaStreamer(backend, channel)
         mca_dma = (
             IIOMcaDmaStreamer(backend, channel)

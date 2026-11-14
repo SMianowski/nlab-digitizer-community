@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   temperature correction, IDS ADC/DAC/TMP117, XADC rails) and the Scope viewer
   capacity are read once per connection; MCA list-mode reads the producer status
   once per frame instead of twice.
+- Faster start-up: lmfit, scipy, xmlschema and the matplotlib/reportlab report
+  stack are imported when a fit, N42 validation or report export first runs, not
+  at launch. `import nlab.app` drops from ~2.3 s to ~0.8 s and offline
+  time-to-window from ~4.1 s to ~2.4 s; a regression test keeps them out of
+  start-up. Application-wide event filters return before any per-widget work for
+  events they do not handle.
+- Faster connect (two channels, measured live with all IIO writes suppressed:
+  ~4.9 s -> ~3.65 s): the two ser2net Modbus bridges are probed concurrently
+  (external discovery 1.6 s -> 0.8 s with no modules attached) and each channel
+  opens its DPP and IDS backends concurrently.
 - MCA polling: without a session recording, the poll rate is capped at the
   15 Hz plot refresh (faster readbacks were coalesced away unseen); sessions keep
   the requested rate. The 8 KiB debug-waveform snapshot is read only while the

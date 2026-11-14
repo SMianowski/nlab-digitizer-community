@@ -7,13 +7,16 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from lmfit import Minimizer, Model, Parameters
-from lmfit.models import ConstantModel, GaussianModel, LinearModel
-from scipy.signal import find_peaks
-from scipy.special import erfc, expit
+
+if TYPE_CHECKING:
+    from lmfit import Model, Parameters
+
+# lmfit (~0.45 s with its matplotlib/pandas imports) and scipy are imported
+# inside the fitting functions: they are only needed when a fit runs, not to
+# start the application.
 
 from nlab.analysis.spectrum import Spectrum
 
@@ -144,6 +147,8 @@ def fit_spectrum_peaks(
         **_kwargs: object,
     ) -> bool:
         return cancel_check()
+
+    from lmfit import Minimizer
 
     minimizer = Minimizer(objective, parameters, iter_cb=iteration_callback)
     result = minimizer.minimize(method="least_squares", max_nfev=10_000)
@@ -277,6 +282,8 @@ def suggest_peak_centers(x: np.ndarray, counts: np.ndarray, peak_count: int) -> 
     signal = counts - baseline
     distance = max(1, len(signal) // (peak_count * 4))
     prominence = max(float(np.ptp(signal)) * 0.02, 1.0e-12)
+    from scipy.signal import find_peaks
+
     candidates, properties = find_peaks(signal, distance=distance, prominence=prominence)
     if len(candidates):
         prominences = np.asarray(properties["prominences"])
@@ -311,6 +318,8 @@ def _build_model(x: np.ndarray, y: np.ndarray, spec: PeakFitSpec) -> tuple[Model
         raise ValueError("peak centres must be distinct")
     if any(centre < x[0] or centre > x[-1] for centre in centres):
         raise ValueError("peak centres must fall inside the fit range")
+    from lmfit.models import GaussianModel
+
     peaks = [GaussianModel(prefix=f"p{index}_") for index in range(1, spec.peak_count + 1)]
     model: Model = peaks[0]
     for peak in peaks[1:]:
@@ -367,6 +376,9 @@ def _build_model(x: np.ndarray, y: np.ndarray, spec: PeakFitSpec) -> tuple[Model
 
 
 def _background_model(background: BackgroundModel) -> Model | None:
+    from lmfit import Model
+    from lmfit.models import ConstantModel, LinearModel
+
     if background == "none":
         return None
     if background == "constant":
@@ -397,6 +409,8 @@ def _compton_step(
     center: float,
     sigma: float,
 ) -> np.ndarray:
+    from scipy.special import erfc
+
     return np.asarray(
         0.5 * amplitude * erfc((x - center) / (np.sqrt(2.0) * sigma)),
         dtype=np.float64,
@@ -409,6 +423,8 @@ def _fermi_step(
     center: float,
     width: float,
 ) -> np.ndarray:
+    from scipy.special import expit
+
     return np.asarray(amplitude * expit(-(x - center) / width), dtype=np.float64)
 
 

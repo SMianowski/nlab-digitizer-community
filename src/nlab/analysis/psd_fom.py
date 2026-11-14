@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from lmfit import Minimizer, Parameters
-from lmfit.minimizer import MinimizerResult
+
+if TYPE_CHECKING:
+    from lmfit import Parameters
+    from lmfit.minimizer import MinimizerResult
+
+# lmfit (~0.45 s) is imported inside the fit functions, not at app start.
 
 _FWHM_FACTOR = 2.0 * math.sqrt(2.0 * math.log(2.0))
 _MIN_FIT_BINS = 12
@@ -122,6 +126,8 @@ def fit_psd_fom_lm(
     # without trapping either centroid on one side of the seed midpoint.
     separation_fraction = (second_seed - first_seed) / (roi_high - first_seed)
     fraction_margin = min(1.0e-6, bin_width / span / 10.0)
+
+    from lmfit import Minimizer, Parameters
 
     parameters = Parameters()
     parameters.add("background", value=background_guess, min=0.0, vary=use_background)
@@ -304,6 +310,8 @@ def fit_psd_fom_separate_lm(
             x, y, search_range=(low, high), background=background,
             bin_width=width, sigma_bounds=(sigma_min, sigma_max),
         )
+        from lmfit import Minimizer, Parameters
+
         parameters = Parameters()
         parameters.add("background", value=background, min=0.0, vary=use_background)
         parameters.add("height", value=height, min=0.0)

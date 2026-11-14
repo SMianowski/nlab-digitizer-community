@@ -21,12 +21,15 @@ from uuid import uuid4
 from xml.etree import ElementTree as ET
 
 import numpy as np
-import xmlschema
 
 from nlab import _version
 from nlab.analysis.spectrum import Spectrum
 
 if TYPE_CHECKING:
+    # xmlschema (~0.18 s) is imported at runtime only when an N42 document
+    # is validated, not at application start.
+    import xmlschema
+
     from nlab.analysis.peak_fitting import PeakFitResult, PeakFitSpec
 
 N42_NAMESPACE = "http://physics.nist.gov/N42/2011/N42"
@@ -263,6 +266,8 @@ def _schema() -> xmlschema.XMLSchema10:
 
 @lru_cache(maxsize=1)
 def _cached_schema() -> xmlschema.XMLSchema10:
+    import xmlschema
+
     data = resources.files("nlab.data")
     with resources.as_file(data) as data_path:
         base_uri = (data_path / "n42.xsd").resolve().as_uri()
@@ -280,6 +285,8 @@ def _cached_schema() -> xmlschema.XMLSchema10:
 def _validated_root(payload: bytes) -> ET.Element:
     if b"<!DOCTYPE" in payload.upper() or b"<!ENTITY" in payload.upper():
         raise N42ValidationError("N42 XML declarations and entities are not allowed")
+    import xmlschema
+
     try:
         resource = xmlschema.XMLResource(payload, allow="none", defuse="always")
     except (ET.ParseError, xmlschema.XMLResourceError) as exc:

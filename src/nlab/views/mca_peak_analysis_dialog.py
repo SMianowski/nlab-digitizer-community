@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from nlab.analysis.mca_report import PeakFitReportRequest, export_peak_fit_report
 from nlab.analysis.n42 import export_n42_peak_fit, export_n42_spectrum
 from nlab.analysis.peak_fitting import (
     BackgroundModel,
@@ -1602,6 +1601,9 @@ class McaPeakAnalysisDialog(QDialog):
         self.workbench_status.setText(f"Fit results exported to {path}")
 
     def _download_fit_report(self) -> None:
+        # Deferred: matplotlib + reportlab cost ~0.45 s at application start.
+        from nlab.analysis.mca_report import PeakFitReportRequest, export_peak_fit_report
+
         result = self._fit_result
         spectrum = self._spectra.get(self._fit_spectrum_id or "")
         spec = self._last_fit_spec

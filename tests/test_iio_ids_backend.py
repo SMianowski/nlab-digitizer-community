@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import math
+import threading
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
@@ -353,6 +354,65 @@ def test_factory_enables_iio_ids_by_default(monkeypatch: pytest.MonkeyPatch) -> 
     assert result.hv is not None
     assert result.hv._b is fake_ids
     assert result.capabilities.ids
+
+
+def _patch_factory_backends(monkeypatch: pytest.MonkeyPatch, dpp, ids) -> None:  # noqa: ANN001
+    from nlab.hardware.digitizer.backends import iio_backend
+
+    monkeypatch.setattr(iio_backend, "IIODigitizerBackend", dpp)
+    monkeypatch.setattr(iio_ids_backend, "IIOIDSBackend", ids)
+
+
+def test_factory_opens_dpp_and_ids_backends_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nlab.hardware.digitizer import digitizer
+
+    both_opening = threading.Barrier(2, timeout=2)
+
+    def dpp(channel: int, uri: str, **_kwargs: object) -> object:
+        both_opening.wait()  # BrokenBarrierError if construction were serial
+        return SimpleNamespace(mca_dma_hardware_present=lambda: False)
+
+    def ids(channel: int, uri: str) -> object:
+        both_opening.wait()
+        return SimpleNamespace()
+
+    _patch_factory_backends(monkeypatch, dpp, ids)
+
+    result = digitizer.Digitizer.from_iio(0, "ip:test")
+
+    assert result.capabilities.ids
+
+
+def test_factory_closes_ids_when_dpp_open_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nlab.hardware.digitizer import digitizer
+
+    opened_ids = SimpleNamespace(close=Mock())
+
+    def dpp(channel: int, uri: str, **_kwargs: object) -> object:
+        raise ConnectionRefusedError("dpp")
+
+    _patch_factory_backends(monkeypatch, dpp, lambda channel, uri: opened_ids)
+
+    with pytest.raises(ConnectionRefusedError, match="dpp"):
+        digitizer.Digitizer.from_iio(0, "ip:test")
+    opened_ids.close.assert_called_once_with()
+
+
+def test_factory_closes_dpp_when_ids_transport_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nlab.hardware.digitizer import digitizer
+
+    opened_dpp = SimpleNamespace(mca_dma_hardware_present=lambda: False, close=Mock())
+
+    def ids(channel: int, uri: str) -> object:
+        raise ConnectionResetError("ids transport")
+
+    _patch_factory_backends(monkeypatch, lambda channel, uri, **_kwargs: opened_dpp, ids)
+
+    with pytest.raises(ConnectionResetError, match="ids transport"):
+        digitizer.Digitizer.from_iio(0, "ip:test")
+    opened_dpp.close.assert_called_once_with()
 
 
 def test_factory_continues_when_channel_ids_devices_are_absent(

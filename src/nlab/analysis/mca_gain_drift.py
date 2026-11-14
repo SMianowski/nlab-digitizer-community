@@ -12,7 +12,9 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter1d
+
+# scipy.ndimage (~0.3 s with scipy) is imported where smoothing runs, so the
+# package import that loads this module stays cheap at application start.
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,8 @@ def estimate_peak_maximum(
         )
 
     raw_index = int(np.argmax(roi))
+    from scipy.ndimage import gaussian_filter1d
+
     smoothed = (
         gaussian_filter1d(roi, smoothing_sigma_bins, mode="nearest")
         if smoothing_sigma_bins > 0

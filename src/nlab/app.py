@@ -177,6 +177,9 @@ class MainAppWindow(QMainWindow):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         """Route log shortcuts to the histogram under the pointer."""
+        # Application-wide filter: only key presses can trigger a shortcut.
+        if event.type() != QEvent.Type.KeyPress:
+            return False
         if self._try_scope_distribution_log_shortcut(event):
             return True
         if self._try_mca_log_shortcut(event):
