@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import errno
 import json
+import logging
 import struct
 import threading
 import time
@@ -17,10 +18,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from queue import Empty, Full, Queue
-from typing import NotRequired, Protocol, TypedDict
+from typing import TYPE_CHECKING, NotRequired, Protocol, TypedDict
 
 import h5py
 import numpy as np
+
+if TYPE_CHECKING:
+    from nlab.hardware.digitizer.reader_process import ReaderSession
 
 MASK64 = (1 << 64) - 1
 MAGICS = {0x31534D5553504456: 123, 0x32534D5553504456: 124}
@@ -490,7 +494,12 @@ class ScopeSumCapture:
     """
 
     def __init__(
-        self, backend: ScopeSumBackend, channel: int, *, configuration_yaml: str = "",
+        self,
+        backend: ScopeSumBackend,
+        channel: int,
+        *,
+        configuration_yaml: str = "",
+        process_uri: str | None = None,
     ) -> None:
         self.backend = backend
         self.channel = channel
@@ -498,9 +507,18 @@ class ScopeSumCapture:
         self.analysis = ScopeSumAnalysis()
         self._stop = threading.Event()
         self._started = False
+        # With a URI, run() reads in a reader process (scope_process.py) and
+        # this object's analysis is fed from the forwarded packets.
+        self._process_uri = process_uri
+        self._session: ReaderSession | None = None
 
     def request_stop(self) -> None:
         self._stop.set()
+        if self._process_uri is not None:
+            session = self._session
+            if session is not None:
+                session.request_stop()
+            return
         if self._started:
             self.backend.request_scope_sum_stop()
 
@@ -513,6 +531,8 @@ class ScopeSumCapture:
         overwrite: bool = False,
     ) -> ScopeSumSnapshot:
         """Record sums; replacing an existing file requires explicit opt-in."""
+        if self._process_uri is not None:
+            return self._run_in_reader_process(path, ready, max_packets, overwrite=overwrite)
         writer = None
         error = ""
         complete = False
@@ -601,3 +621,57 @@ class ScopeSumCapture:
         if error:
             raise RuntimeError(error)
         return self.analysis.snapshot() | {"complete": complete, "final_missed_windows": missed}
+
+    def _run_in_reader_process(
+        self,
+        path: Path | None,
+        ready: Callable[[], None] | None,
+        max_packets: int | None,
+        *,
+        overwrite: bool,
+    ) -> ScopeSumSnapshot:
+        """Run the sum session in a reader process; analyse its packets here."""
+        from nlab.hardware.digitizer.reader_process import ReaderSession, raise_child_error
+        from nlab.hardware.digitizer.scope_process import ScopeSumRequest, sum_label, sum_main
+
+        assert self._process_uri is not None
+        latched = getattr(self.backend, "dma_fault_is_latched", None)
+        if callable(latched) and latched():
+            raise RuntimeError(
+                "DMA fault is latched from a previous session -- call "
+                "acknowledge_dma_recovery() before capturing again"
+            )
+        request = ScopeSumRequest(
+            uri=self._process_uri,
+            channel=self.channel,
+            filepath=str(path) if path is not None else None,
+            max_packets=max_packets,
+            overwrite=overwrite,
+            configuration_yaml=self.configuration_yaml,
+            log_level=logging.getLogger().getEffectiveLevel(),
+        )
+
+        def data(items: list[bytes], _dropped: int) -> None:
+            # The child's sum queue is lossless; packets arrive in order.
+            for raw in items:
+                self.analysis.append(decode_sum_packet(raw))
+
+        handlers: dict[str, Callable[..., None]] = {"data": data}
+        if ready is not None:
+            handlers["ready"] = ready
+        session = ReaderSession(sum_main, request, label=sum_label(self.channel))
+        self._session = session
+        try:
+            finished = session.run(self._stop, handlers)
+        finally:
+            self._session = None
+            adopt = getattr(self.backend, "adopt_scope_dma_session_state", None)
+            if callable(adopt):
+                report = session.finished
+                adopt(None if report is None else bool(report.get("fault_latched")))
+        raise_child_error(finished)
+        missed = finished.get("final_missed_windows")
+        return self.analysis.snapshot() | {
+            "complete": bool(finished.get("complete")),
+            "final_missed_windows": missed if isinstance(missed, int) else 0,
+        }

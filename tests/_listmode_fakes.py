@@ -22,8 +22,8 @@ def frames(count: int, seed: int = 7) -> np.ndarray:
 def streams_then_finishes(control: Any, data: Any, request: Any) -> None:
     data.send(("ready",))
     data.send(("log", {"name": "nlab.fake", "levelno": logging.WARNING, "msg": "hello"}))
-    data.send(("events", frames(2).tobytes(), 0))
-    data.send(("events", b"", 5))
+    data.send(("data", [frames(1).tobytes(), frames(2)[1024:].tobytes()], 0))
+    data.send(("data", [], 5))
     data.send(("progress", 2048))
     data.send(("finished", {
         "ok": True, "records": 3072, "recovery_required": False,

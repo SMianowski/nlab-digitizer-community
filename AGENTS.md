@@ -79,6 +79,13 @@ For both Scope and MCA DMA:
 
 Additional rules:
 
+- Scope waveform, periodic-sum and MCA list-mode DMA run each session in a spawned
+  reader process (`reader_process.py`, `scope_process.py`, `listmode_process.py`) so
+  GUI work cannot starve them of the interpreter lock. The child owns the buffer,
+  contexts and capture file. Keep it free of Qt imports, stop it only through its
+  control pipe (never terminate it), and mirror its final fault latch into the
+  GUI-side backend. Exact GUI-side analyses (Current accumulator, sum analysis) get a
+  lossless, backpressured queue; display-only consumers a bounded one with drops counted.
 - Never write `dma_enable` or list-buffer ownership gates directly; buffer callbacks own
   those gates.
 - Do not rely on Python destructors for native buffer cleanup.
@@ -109,10 +116,6 @@ Additional rules:
   Keep replay and connection-loss protection.
 - Shared START disable selects external bypass, not STOP. Change routing only
   with both MCAs stopped/list-closed; arm both readers/cores before asserting HIGH.
-- MCA list mode runs each session in a spawned reader process (`listmode_process.py`)
-  so GUI work cannot starve it of the interpreter lock. Keep the child free of Qt
-  imports, stop it only through its control pipe (never terminate it), and mirror its
-  final recovery latch into the GUI-side backend.
 - Do not reconfigure the MCA during list-mode DMA; that requires the complete worker
   stop/drain/close/rearm lifecycle.
 - Preserve support for both the current split histogram attributes and the earlier

@@ -20,7 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delivered to the live view. The child also writes the capture file. If the GUI
   process dies mid-capture, the child still stops the MCA, drains, closes and
   writes a valid file (validated live). Start-up adds ~0.45 s before Ready.
-  `NLAB_LISTMODE_IN_PROCESS=1` restores the in-process reader for diagnostics.
+  `NLAB_DMA_IN_PROCESS=1` restores the in-process readers for diagnostics.
+- Scope waveform DMA and Current periodic sums now also run in reader processes
+  (`scope_process.py`, sharing `reader_process.py` with list mode). Live on ch0 next
+  to a CPU-busy Python thread: raw waveforms 474 -> 9016 frames/s (same as idle);
+  periodic sums at 1000 samples/window 367-419k -> ~4.4k missed windows in 5 s, the
+  FPGA's normal one per packet at gap 0. Files (NDMA, sum HDF5) are written by the
+  child. The Current accumulator and sum analysis stay in the GUI and receive every
+  captured record through a lossless, backpressured queue (with a busy GUI thread the
+  accumulator sustained ~5200 frames/s, each analysed); display-only waveforms use a
+  bounded queue with counted drops. If the GUI dies mid-capture, the reader clears
+  `enable`/`dma_enable` and closes its file (validated live).
 - MCA list mode now arms 64 kernel blocks (1 MiB per channel) instead of the
   PetaLinux reference value of eight. Live on v121 ch0, even a reader with no GUI
   saw 20-50 ms stalls that emptied eight blocks (`queued_blocks` 0) and the IP

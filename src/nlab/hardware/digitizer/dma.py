@@ -38,6 +38,7 @@ from nlab.hardware.digitizer.scope_sums import (
 if TYPE_CHECKING:
     from nlab.hardware.digitizer.current_monitor import ScopeCurrentAccumulator
     from nlab.hardware.digitizer.listmode_process import ListModeProcessSession
+    from nlab.hardware.digitizer.reader_process import ReaderSession
 
 
 class _IIOScopeBackend(ScopeSumBackend, Protocol):
@@ -246,6 +247,16 @@ class ScopeFrameBuffer:
             subscribers = tuple(self._subscribers)
         for subscriber in subscribers:
             subscriber.append(frame)
+
+    def add_dropped(self, frames: int) -> None:
+        """Account frames an upstream display queue (the reader process) dropped."""
+        if frames <= 0:
+            return
+        with self._lock:
+            self._dropped_frames += frames
+            subscribers = tuple(self._subscribers)
+        for subscriber in subscribers:
+            subscriber.add_dropped(frames)
 
     def subscribe(self, subscriber: ScopeFrameBuffer) -> None:
         if subscriber is self:
@@ -470,18 +481,41 @@ class IIOScopeDmaStreamer:
     because NDMA v1 cannot describe the decimation or padding.
     """
 
-    def __init__(self, backend: _IIOScopeBackend, channel: int) -> None:
+    def __init__(
+        self,
+        backend: _IIOScopeBackend,
+        channel: int,
+        *,
+        process_uri: str | None = None,
+    ) -> None:
+        """*process_uri* runs each waveform/sum session in a reader process.
+
+        See scope_process.py. Without it (tests, scripts, NLAB_DMA_IN_PROCESS=1)
+        sessions run on the caller's thread against *backend* as before.
+        """
         self._backend = backend
         self._channel = channel
+        self._process_uri = process_uri
+        self._session_lock = threading.Lock()
+        self._session: ReaderSession | None = None
 
     def request_stop(self) -> None:
         """Stop the acquisition gate and cancel a blocked backend refill."""
+        if self._process_uri is not None:
+            # The session also forwards the caller's stop_event, so a stop
+            # that precedes the spawn is delivered once the child exists.
+            with self._session_lock:
+                session = self._session
+            if session is not None:
+                session.request_stop()
+            return
         self._backend.request_dma_stop()
 
     def create_sum_capture(self, *, configuration_yaml: str = "") -> ScopeSumCapture:
         """Create a distinct sum session with an optional full configuration snapshot."""
         return ScopeSumCapture(
             self._backend, self._channel, configuration_yaml=configuration_yaml,
+            process_uri=self._process_uri,
         )
 
     def capture_geometry(self) -> ScopeDmaGeometry:
@@ -547,6 +581,11 @@ class IIOScopeDmaStreamer:
         leaving the buffer open here would leave the hardware armed after
         the caller thinks the measurement has stopped.
         """
+        if self._process_uri is not None:
+            return self._stream_in_reader_process(
+                filepath, stop_event, n_frames, on_ready, on_progress,
+                frame_buffer, current_accumulator,
+            )
         self._backend.prepare_dma_capture()
         geometry = self.capture_geometry()
         frame_samples = geometry.frame_samples
@@ -770,6 +809,114 @@ class IIOScopeDmaStreamer:
         log.info("IIO scope DMA: finished -- %d frames to %s", frame_count, destination)
         return frame_count
 
+    def _stream_in_reader_process(
+        self,
+        filepath: Path | None,
+        stop_event: threading.Event,
+        n_frames: int | None,
+        on_ready: Callable[[], None] | None,
+        on_progress: Callable[[int], None] | None,
+        frame_buffer: ScopeFrameBuffer | None,
+        current_accumulator: ScopeCurrentAccumulator | None,
+    ) -> int:
+        """Run stream_to_file() in a reader process; feed the GUI consumers here."""
+        from nlab.hardware.digitizer.reader_process import (
+            ReaderProcessCrashedError,
+            ReaderSession,
+            raise_child_error,
+        )
+        from nlab.hardware.digitizer.scope_process import (
+            ScopeWaveformRequest,
+            waveform_label,
+            waveform_main,
+        )
+
+        assert self._process_uri is not None
+        latched = getattr(self._backend, "dma_fault_is_latched", None)
+        if callable(latched) and latched():
+            raise RuntimeError(
+                "DMA fault is latched from a previous session -- call "
+                "acknowledge_dma_recovery() before capturing again"
+            )
+        request = ScopeWaveformRequest(
+            uri=self._process_uri,
+            channel=self._channel,
+            filepath=str(filepath) if filepath is not None else None,
+            n_frames=n_frames,
+            want_frames=frame_buffer is not None or current_accumulator is not None,
+            lossless=current_accumulator is not None,
+            log_level=logging.getLogger().getEffectiveLevel(),
+        )
+        geometry: list[ScopeDmaGeometry] = []
+        dropped_seen = 0
+
+        def note(key: str, value: object = None) -> None:
+            if key == "geometry":
+                assert isinstance(value, ScopeDmaGeometry)
+                geometry[:] = [value]
+            elif current_accumulator is None:
+                return
+            elif key == "runtime":
+                assert isinstance(value, dict)
+                current_accumulator.update_runtime_transport(**value)
+            elif key == "rejected":
+                current_accumulator.note_rejected_frame()
+            elif key == "protocol_error":
+                current_accumulator.note_protocol_error()
+
+        def data(items: list[tuple[bytes, int]], dropped: int) -> None:
+            nonlocal dropped_seen
+            if items:
+                layout = geometry[0]
+                for record, received_ns in items:
+                    if current_accumulator is not None:
+                        current_accumulator.append_frame(record, layout, received_ns)
+                    if frame_buffer is not None:
+                        frame_buffer.append(
+                            ScopeDmaFrame(
+                                timestamp=int.from_bytes(record[:8], "little"),
+                                received_ns=received_ns,
+                                samples=np.frombuffer(
+                                    record,
+                                    dtype="<i2",
+                                    count=layout.waveform_samples,
+                                    offset=SCOPE_TIMESTAMP_WORDS * 2,
+                                ),
+                                geometry=layout,
+                            )
+                        )
+            if dropped > dropped_seen:
+                if frame_buffer is not None:
+                    frame_buffer.add_dropped(dropped - dropped_seen)
+                dropped_seen = dropped
+
+        handlers: dict[str, Callable[..., None]] = {"note": note, "data": data}
+        if on_ready is not None:
+            handlers["ready"] = on_ready
+        if on_progress is not None:
+            handlers["progress"] = on_progress
+        session = ReaderSession(waveform_main, request, label=waveform_label(self._channel))
+        with self._session_lock:
+            self._session = session
+        try:
+            finished = session.run(stop_event, handlers)
+        except ReaderProcessCrashedError:
+            if current_accumulator is not None and not stop_event.is_set():
+                current_accumulator.note_protocol_error()
+            raise
+        finally:
+            with self._session_lock:
+                self._session = None
+            if current_accumulator is not None:
+                current_accumulator.finish_session()
+            adopt = getattr(self._backend, "adopt_scope_dma_session_state", None)
+            if callable(adopt):
+                report = session.finished
+                adopt(None if report is None else bool(report.get("fault_latched")))
+        raise_child_error(finished)
+        frames = finished.get("frames")
+        return frames if isinstance(frames, int) else 0
+
 
 class IIOMcaDmaStreamer:
     """Pull fixed 16 KiB MCA list-mode blocks from the IIO backend.
@@ -790,9 +937,9 @@ class IIOMcaDmaStreamer:
     ) -> None:
         """*process_uri* runs each session in a dedicated reader process.
 
-        See listmode_process.py: a busy GUI thread starved the in-process
+        See reader_process.py: a busy GUI thread starved the in-process
         reader of the interpreter lock and the FPGA dropped records. Without
-        it (tests, scripts, NLAB_LISTMODE_IN_PROCESS=1) the session runs on
+        it (tests, scripts, NLAB_DMA_IN_PROCESS=1) the session runs on
         the caller's thread against *backend* exactly as before.
         """
         self._backend = backend
@@ -866,12 +1013,12 @@ class IIOMcaDmaStreamer:
                 stop_event, filepath, event_buffer, on_ready, on_progress,
                 output_mode, configuration_yaml, client_record_schema,
             )
-        return self._stream_events_in_process(
+        return self._stream_events_in_reader_process(
             stop_event, filepath, event_buffer, on_ready, on_progress,
             output_mode, configuration_yaml, client_record_schema,
         )
 
-    def _stream_events_in_process(
+    def _stream_events_in_reader_process(
         self,
         stop_event: threading.Event,
         filepath: Path | None,

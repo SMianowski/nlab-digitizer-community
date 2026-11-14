@@ -352,6 +352,7 @@ class IIODigitizerBackend(DigitizerBackend):
         dac_channel: int | None = None,
         *,
         _scope_only: bool = False,
+        _scope_dma_only: bool = False,
         _listmode_only: bool = False,
         profile: AcquisitionProfile | None = None,
     ) -> None:
@@ -360,6 +361,7 @@ class IIODigitizerBackend(DigitizerBackend):
         self._dac_name = dac_name
         self._dac_channel = dac_channel
         self._scope_only = _scope_only
+        self._scope_dma_only = _scope_dma_only
         self._listmode_only = _listmode_only
         self._acquisition_profile = profile
         self._device_information: DigitizerInformation | None = None
@@ -487,6 +489,12 @@ class IIODigitizerBackend(DigitizerBackend):
         if dma_chan is None:
             raise RuntimeError(f"{_SCOPE_DEVICE_NAME} has no voltage0 channel")
         dma_chan.enabled = True
+
+        if _scope_dma_only:
+            # The Scope DMA reader process (scope_process.py) needs the
+            # control context (enable/STOP) and the DMA context only.
+            log.info("IIO backend: connected Scope DMA reader ch%d to %s", channel, uri)
+            return
 
         # MCA (pulse-processor + input-filter) -- optional, mirroring the
         # DAC's graceful-degradation pattern above: older firmware builds
@@ -690,7 +698,7 @@ class IIODigitizerBackend(DigitizerBackend):
         if getattr(self, "_listmode_only", False):
             self._close_mca_dma_buffer()
             return
-        if self._scope_only:
+        if self._scope_only or getattr(self, "_scope_dma_only", False):
             self._close_dma_buffer()
             return
         self._close_mca_dma_buffer()
@@ -1027,6 +1035,16 @@ class IIODigitizerBackend(DigitizerBackend):
         buf = self._dma_buf
         if buf is not None:
             buf.cancel()
+
+    def adopt_scope_dma_session_state(self, fault_latched: bool | None) -> None:
+        """Mirror a Scope reader process's final latch into this backend.
+
+        ``None`` means the process ended without reporting (crashed), so the
+        target state is unverified and must be latched. The controller's
+        existing passive acknowledge_dma_recovery() then decides rearm.
+        """
+        if fault_latched is None or fault_latched:
+            self._dma_fault_latched = True
 
     def dma_fault_is_latched(self) -> bool:
         """Extension method (not part of ScopeBackend), matching

@@ -64,7 +64,7 @@ def test_session_relays_ready_events_drops_progress_and_logs(caplog: Any) -> Non
         )
 
     assert records == 3072
-    assert ready == [None] and progress == [2048] and dropped == [5]
+    assert ready == [None] and progress == [2048] and dropped == [5 * 1024]
     assert len(events) == 1 and events[0].dtype == IIO_LM_EVENT_DTYPE
     np.testing.assert_array_equal(events[0], fakes.frames(2))
     assert session.outcome.recovery_required is False
@@ -209,7 +209,7 @@ def test_reader_main_stops_capture_when_the_gui_process_disappears(
     child.start()
 
     messages: list[tuple[Any, ...]] = []
-    while not any(m[0] == "events" for m in messages):
+    while not any(m[0] == "data" and m[1] for m in messages):
         assert data_recv.poll(5.0)
         messages.append(data_recv.recv())
     control_send.close()  # the GUI process is gone
@@ -222,7 +222,7 @@ def test_reader_main_stops_capture_when_the_gui_process_disappears(
     finished = messages[-1][1]
     assert finished["ok"] is True and finished["recovery_required"] is False
     assert stops == [None]
-    received = sum(len(m[1]) for m in messages if m[0] == "events")
+    received = sum(len(item) for m in messages if m[0] == "data" for item in m[1])
     assert received == finished["records"] * IIO_LM_EVENT_DTYPE.itemsize
     assert finished["diagnostics"] == {"continuity_valid": True}
 
@@ -231,6 +231,9 @@ def test_reader_process_modules_do_not_import_qt() -> None:
     probe = (
         "import sys\n"
         "import nlab.hardware.digitizer.listmode_process\n"
+        "import nlab.hardware.digitizer.reader_process\n"
+        "import nlab.hardware.digitizer.scope_process\n"
+        "import nlab.hardware.digitizer.scope_sums\n"
         "import nlab.hardware.digitizer.backends.iio_backend\n"
         "import nlab.hardware.digitizer.dma\n"
         "print(any(m.startswith('PySide6') for m in sys.modules))\n"

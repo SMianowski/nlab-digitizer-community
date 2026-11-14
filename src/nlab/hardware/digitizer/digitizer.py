@@ -175,16 +175,15 @@ class Digitizer:
             except BaseException:
                 backend.close()
                 raise
-        scope_dma = IIOScopeDmaStreamer(backend, channel)
-        from .listmode_process import in_process_requested
+        from .reader_process import in_process_requested
 
-        # List mode runs in its own reader process so GUI work cannot starve
-        # it of the interpreter lock (listmode_process.py has the live data).
+        # Scope and list-mode DMA read in their own processes so GUI work
+        # cannot starve them of the interpreter lock (reader_process.py).
+        process_uri = None if in_process_requested() else uri
+        scope_dma = IIOScopeDmaStreamer(backend, channel, process_uri=process_uri)
+
         mca_dma = (
-            IIOMcaDmaStreamer(
-                backend, channel,
-                process_uri=None if in_process_requested() else uri,
-            )
+            IIOMcaDmaStreamer(backend, channel, process_uri=process_uri)
             if backend.mca_dma_hardware_present()
             else None
         )
