@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import logging
+import multiprocessing
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -147,6 +148,10 @@ def _int_value(value: object) -> int | None:
 
 
 def main() -> None:
+    # MCA list mode runs in a spawned reader process. In frozen builds that
+    # child re-executes this program; freeze_support() runs the child there
+    # and exits before any GUI start-up. A no-op when not frozen.
+    multiprocessing.freeze_support()
     _configure_logging()
     args, qt_args = _parse_arguments(sys.argv[1:])
     _set_windows_app_user_model_id()
@@ -328,4 +333,5 @@ def _update_splash(splash: QSplashScreen, message: str) -> None:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

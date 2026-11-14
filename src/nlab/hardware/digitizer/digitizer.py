@@ -176,8 +176,15 @@ class Digitizer:
                 backend.close()
                 raise
         scope_dma = IIOScopeDmaStreamer(backend, channel)
+        from .listmode_process import in_process_requested
+
+        # List mode runs in its own reader process so GUI work cannot starve
+        # it of the interpreter lock (listmode_process.py has the live data).
         mca_dma = (
-            IIOMcaDmaStreamer(backend, channel)
+            IIOMcaDmaStreamer(
+                backend, channel,
+                process_uri=None if in_process_requested() else uri,
+            )
             if backend.mca_dma_hardware_present()
             else None
         )

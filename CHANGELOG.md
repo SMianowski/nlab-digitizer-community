@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- MCA list-mode DMA now runs in a dedicated reader process per capture session
+  (`nlab/hardware/digitizer/listmode_process.py`). In the GUI process every libiio
+  call released the interpreter lock and had to win it back from GUI work, while the
+  eight kernel blocks hold only ~15 ms at ~530 kcps, so the FPGA dropped records
+  (12% in a live online-only GUI run). Live (v121, ch0) next to a CPU-busy Python
+  thread: in-process 87 frames in 3 s, reader process ~1590 with every record
+  delivered to the live view. The child also writes the capture file. If the GUI
+  process dies mid-capture, the child still stops the MCA, drains, closes and
+  writes a valid file (validated live). Start-up adds ~0.45 s before Ready.
+  `NLAB_LISTMODE_IN_PROCESS=1` restores the in-process reader for diagnostics.
 - Current HDF5 sum recordings default to the measurement folder from General
   Settings. A blank filename generates `chN_current_<timestamp>.h5` on Start;
   relative names use that folder and explicit absolute paths retain their location.

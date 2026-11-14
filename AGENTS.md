@@ -109,6 +109,10 @@ Additional rules:
   Keep replay and connection-loss protection.
 - Shared START disable selects external bypass, not STOP. Change routing only
   with both MCAs stopped/list-closed; arm both readers/cores before asserting HIGH.
+- MCA list mode runs each session in a spawned reader process (`listmode_process.py`)
+  so GUI work cannot starve it of the interpreter lock. Keep the child free of Qt
+  imports, stop it only through its control pipe (never terminate it), and mirror its
+  final recovery latch into the GUI-side backend.
 - Do not reconfigure the MCA during list-mode DMA; that requires the complete worker
   stop/drain/close/rearm lifecycle.
 - Preserve support for both the current split histogram attributes and the earlier

@@ -37,6 +37,7 @@ from nlab.hardware.digitizer.scope_sums import (
 
 if TYPE_CHECKING:
     from nlab.hardware.digitizer.current_monitor import ScopeCurrentAccumulator
+    from nlab.hardware.digitizer.listmode_process import ListModeProcessSession
 
 
 class _IIOScopeBackend(ScopeSumBackend, Protocol):
@@ -302,6 +303,16 @@ class McaEventBuffer:
         # from one another by draining the same queue.
         for subscriber in subscribers:
             subscriber.append(events)
+
+    def add_dropped(self, records: int) -> None:
+        """Account records an upstream display queue (the reader process) dropped."""
+        if records <= 0:
+            return
+        with self._lock:
+            self._dropped_records += records
+            subscribers = tuple(self._subscribers)
+        for subscriber in subscribers:
+            subscriber.add_dropped(records)
 
     def subscribe(self, subscriber: McaEventBuffer) -> None:
         if subscriber is self:
@@ -769,9 +780,25 @@ class IIOMcaDmaStreamer:
     the documented one-second inactivity window, then destroy the buffer.
     """
 
-    def __init__(self, backend: _IIOMcaBackend, channel: int) -> None:
+    def __init__(
+        self,
+        backend: _IIOMcaBackend,
+        channel: int,
+        *,
+        process_uri: str | None = None,
+    ) -> None:
+        """*process_uri* runs each session in a dedicated reader process.
+
+        See listmode_process.py: a busy GUI thread starved the in-process
+        reader of the interpreter lock and the FPGA dropped records. Without
+        it (tests, scripts, NLAB_LISTMODE_IN_PROCESS=1) the session runs on
+        the caller's thread against *backend* exactly as before.
+        """
         self._backend = backend
         self._channel = channel
+        self._process_uri = process_uri
+        self._session_lock = threading.Lock()
+        self._session: ListModeProcessSession | None = None
         self.last_capture_diagnostics: dict[str, object] | None = None
 
     def transport_identity(self) -> dict[str, int | str]:
@@ -807,6 +834,14 @@ class IIOMcaDmaStreamer:
 
     def request_stop(self) -> None:
         """Stop production while leaving the reader armed for tail drain."""
+        if self._process_uri is not None:
+            # The process session also forwards the caller's stop_event, so a
+            # stop that precedes the spawn is delivered once it exists.
+            with self._session_lock:
+                session = self._session
+            if session is not None:
+                session.request_stop()
+            return
         self._backend.request_mca_dma_stop()
 
     def stream_events(
@@ -821,6 +856,96 @@ class IIOMcaDmaStreamer:
         client_record_schema: str | None = None,
     ) -> int:
         """Read complete 1024-record blocks until stopped.
+
+        Runs in the reader process when one is configured, otherwise on the
+        calling thread (see ``_stream_events_local``).
+        """
+        if self._process_uri is None:
+            return self._stream_events_local(
+                stop_event, filepath, event_buffer, on_ready, on_progress,
+                output_mode, configuration_yaml, client_record_schema,
+            )
+        return self._stream_events_in_process(
+            stop_event, filepath, event_buffer, on_ready, on_progress,
+            output_mode, configuration_yaml, client_record_schema,
+        )
+
+    def _stream_events_in_process(
+        self,
+        stop_event: threading.Event,
+        filepath: Path | None,
+        event_buffer: McaEventBuffer | tuple[list[np.ndarray], threading.Lock] | None,
+        on_ready: Callable[[], None] | None,
+        on_progress: Callable[[int], None] | None,
+        output_mode: McaDmaOutputMode,
+        configuration_yaml: str,
+        client_record_schema: str | None,
+    ) -> int:
+        from nlab.hardware.digitizer.listmode_process import (
+            ListModeProcessSession,
+            ListModeRequest,
+        )
+
+        assert self._process_uri is not None
+        recovery_required = getattr(self._backend, "mca_recovery_required", None)
+        if callable(recovery_required) and recovery_required():
+            raise RuntimeError(
+                "MCA DMA fault is latched; acknowledge_mca_dma_recovery() required"
+            )
+        profile_reader = getattr(self._backend, "acquisition_profile", None)
+        profile = profile_reader() if callable(profile_reader) else None
+        request = ListModeRequest(
+            uri=self._process_uri,
+            channel=self._channel,
+            profile=profile or None,
+            filepath=str(filepath) if filepath is not None else None,
+            output_mode=output_mode.value,
+            configuration_yaml=configuration_yaml,
+            client_record_schema=client_record_schema,
+            want_events=event_buffer is not None,
+            log_level=logging.getLogger().getEffectiveLevel(),
+        )
+
+        def on_events(events: np.ndarray) -> None:
+            if event_buffer is not None:
+                _append_mca_event_batch(event_buffer, events)
+
+        def on_dropped(records: int) -> None:
+            if isinstance(event_buffer, McaEventBuffer):
+                event_buffer.add_dropped(records)
+
+        session = ListModeProcessSession(request)
+        self.last_capture_diagnostics = None
+        with self._session_lock:
+            self._session = session
+        try:
+            return session.run(
+                stop_event,
+                on_ready=on_ready,
+                on_progress=on_progress,
+                on_events=on_events,
+                on_dropped=on_dropped,
+            )
+        finally:
+            with self._session_lock:
+                self._session = None
+            self.last_capture_diagnostics = session.outcome.diagnostics
+            adopt = getattr(self._backend, "adopt_mca_dma_session_state", None)
+            if callable(adopt):
+                adopt(session.outcome.recovery_required)
+
+    def _stream_events_local(
+        self,
+        stop_event: threading.Event,
+        filepath: Path | None = None,
+        event_buffer: McaEventBuffer | tuple[list[np.ndarray], threading.Lock] | None = None,
+        on_ready: Callable[[], None] | None = None,
+        on_progress: Callable[[int], None] | None = None,
+        output_mode: McaDmaOutputMode = McaDmaOutputMode.BINARY,
+        configuration_yaml: str = "",
+        client_record_schema: str | None = None,
+    ) -> int:
+        """Run one session on the calling thread against the bound backend.
 
         Raw IIO records are written unchanged. NDMA version 2 identifies
         their layout; version 1 remains the legacy event-record layout. The

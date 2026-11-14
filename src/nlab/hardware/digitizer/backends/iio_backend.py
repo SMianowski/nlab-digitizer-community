@@ -345,6 +345,7 @@ class IIODigitizerBackend(DigitizerBackend):
         dac_channel: int | None = None,
         *,
         _scope_only: bool = False,
+        _listmode_only: bool = False,
         profile: AcquisitionProfile | None = None,
     ) -> None:
         self._ch = channel
@@ -352,8 +353,22 @@ class IIODigitizerBackend(DigitizerBackend):
         self._dac_name = dac_name
         self._dac_channel = dac_channel
         self._scope_only = _scope_only
+        self._listmode_only = _listmode_only
         self._acquisition_profile = profile
         self._device_information: DigitizerInformation | None = None
+        if _listmode_only:
+            # The list-mode reader process (listmode_process.py) needs only
+            # its stream and control contexts. Opening the Scope, DAC, polling
+            # and GUI contexts there would cost connections nothing uses.
+            self._pp = None
+            self._init_mca_dma(uri, channel, open_contexts=True)
+            if not self.mca_dma_hardware_present():
+                raise RuntimeError(
+                    f"no paired {_PULSE_PROCESSOR_DEVICE_NAME}/{_LM_FRAME_DEVICE_NAME} "
+                    f"devices for channel {channel} at {uri}"
+                )
+            log.info("IIO backend: connected list-mode reader ch%d to %s", channel, uri)
+            return
         self._ctx = iio.Context(uri)
 
         scopes = _devices_named(self._ctx, _SCOPE_DEVICE_NAME)
@@ -540,62 +555,7 @@ class IIODigitizerBackend(DigitizerBackend):
             self._mca_ctx = None
             self._mca_pp = None
 
-        # List-mode DMA uses two more contexts with one transport role each.
-        # The stream context owns only vdpp_lm_frame/Buffer.refill(); the
-        # control context owns pulse_processor.enable and its gate reads.
-        # mca_listmode_capture.py explicitly forbids multiplexing a blocked
-        # refill and measurement control over one remote iiod connection.
-        # MCA polling uses _mca_ctx and GUI/config calls use _ctx, so neither
-        # is shared with the DMA worker either.
-        self._mca_dma_ctx: iio.Context | None = None
-        self._mca_dma_control_ctx: iio.Context | None = None
-        self._mca_dma_control_lock = threading.RLock()
-        self._mca_dma_pp: iio.Device | None = None
-        self._lm_frame: iio.Device | None = None
-        self._lm_status_device: iio.Device | None = None
-        self._mca_dma_buf: iio.Buffer | None = None
-        self._mca_dma_reader: threading.Thread | None = None
-        self._mca_dma_fault_latched = False
-        self._mca_stop_uncertain = False
-        self._mca_cleanup_errors: list[dict[str, int | str]] = []
-        self._mca_dma_stop_requested = threading.Event()
-        self._mca_dma_lifecycle_lock = threading.RLock()
-        self._mca_dma_cancel_timer: threading.Timer | None = None
-        self._mca_dma_cancel_explained = False
-        # Monotonic start of the refill currently blocked on the list-mode
-        # buffer (None while the reader is consuming, writing or parsing),
-        # and whether this session's buffer has been cancelled. A cancelled
-        # libiio buffer can never be refilled again.
-        self._mca_dma_refill_since: float | None = None
-        self._mca_dma_buf_cancelled = False
-        if self._pp is not None:
-            mca_dma_ctx = iio.Context(uri)
-            mca_dma_control_ctx = iio.Context(uri)
-            mca_dma_pp = _device_for_channel(
-                mca_dma_control_ctx, _PULSE_PROCESSOR_DEVICE_NAME, channel,
-            )
-            lm_frame = _device_for_channel(
-                mca_dma_ctx, _LM_FRAME_DEVICE_NAME, channel,
-            )
-            if mca_dma_pp is not None and lm_frame is not None:
-                # refill() may legitimately wait for an operator-driven
-                # shared software trigger for an arbitrary amount of time.
-                # Keep only the buffer stream unbounded; control I/O stays
-                # on mca_dma_control_ctx with its normal network timeout.
-                _disable_mca_dma_client_timeout(mca_dma_ctx)
-                log.debug(
-                    "IIO backend ch%d: MCA DMA external-trigger wait "
-                    "configured; retryable timeout errnos=%s",
-                    channel,
-                    sorted(_LIBIIO_TIMEOUT_ERRNOS),
-                )
-                self._mca_dma_ctx = mca_dma_ctx
-                self._mca_dma_control_ctx = mca_dma_control_ctx
-                self._mca_dma_pp = mca_dma_pp
-                self._lm_frame = lm_frame
-                self._lm_status_device = _device_for_channel(
-                    mca_dma_control_ctx, _LM_FRAME_DEVICE_NAME, channel,
-                )
+        self._init_mca_dma(uri, channel, open_contexts=self._pp is not None)
 
         log.info("IIO backend: connected ch%d (%s) to %s", channel, _SCOPE_DEVICE_NAME, uri)
         if self._pp is None:
@@ -650,12 +610,79 @@ class IIODigitizerBackend(DigitizerBackend):
             self._device_information = None
             log.warning("IIO ch%d: device information unavailable: %s", channel, exc)
 
+    def _init_mca_dma(self, uri: str, channel: int, *, open_contexts: bool) -> None:
+        """Initialise list-mode DMA state and, if requested, its two contexts.
+
+        Shared by the full backend and the list-mode reader process's
+        ``_listmode_only`` backend so both run the identical lifecycle.
+        """
+        # List-mode DMA uses two more contexts with one transport role each.
+        # The stream context owns only vdpp_lm_frame/Buffer.refill(); the
+        # control context owns pulse_processor.enable and its gate reads.
+        # mca_listmode_capture.py explicitly forbids multiplexing a blocked
+        # refill and measurement control over one remote iiod connection.
+        # MCA polling uses _mca_ctx and GUI/config calls use _ctx, so neither
+        # is shared with the DMA worker either.
+        self._mca_dma_ctx: iio.Context | None = None
+        self._mca_dma_control_ctx: iio.Context | None = None
+        self._mca_dma_control_lock = threading.RLock()
+        self._mca_dma_pp: iio.Device | None = None
+        self._lm_frame: iio.Device | None = None
+        self._lm_status_device: iio.Device | None = None
+        self._mca_dma_buf: iio.Buffer | None = None
+        self._mca_dma_reader: threading.Thread | None = None
+        self._mca_dma_fault_latched = False
+        self._mca_stop_uncertain = False
+        self._mca_cleanup_errors: list[dict[str, int | str]] = []
+        self._mca_dma_stop_requested = threading.Event()
+        self._mca_dma_lifecycle_lock = threading.RLock()
+        self._mca_dma_cancel_timer: threading.Timer | None = None
+        self._mca_dma_cancel_explained = False
+        # Monotonic start of the refill currently blocked on the list-mode
+        # buffer (None while the reader is consuming, writing or parsing),
+        # and whether this session's buffer has been cancelled. A cancelled
+        # libiio buffer can never be refilled again.
+        self._mca_dma_refill_since: float | None = None
+        self._mca_dma_buf_cancelled = False
+        if open_contexts:
+            mca_dma_ctx = iio.Context(uri)
+            mca_dma_control_ctx = iio.Context(uri)
+            mca_dma_pp = _device_for_channel(
+                mca_dma_control_ctx, _PULSE_PROCESSOR_DEVICE_NAME, channel,
+            )
+            lm_frame = _device_for_channel(
+                mca_dma_ctx, _LM_FRAME_DEVICE_NAME, channel,
+            )
+            if mca_dma_pp is not None and lm_frame is not None:
+                # refill() may legitimately wait for an operator-driven
+                # shared software trigger for an arbitrary amount of time.
+                # Keep only the buffer stream unbounded; control I/O stays
+                # on mca_dma_control_ctx with its normal network timeout.
+                _disable_mca_dma_client_timeout(mca_dma_ctx)
+                log.debug(
+                    "IIO backend ch%d: MCA DMA external-trigger wait "
+                    "configured; retryable timeout errnos=%s",
+                    channel,
+                    sorted(_LIBIIO_TIMEOUT_ERRNOS),
+                )
+                self._mca_dma_ctx = mca_dma_ctx
+                self._mca_dma_control_ctx = mca_dma_control_ctx
+                self._mca_dma_pp = mca_dma_pp
+                self._lm_frame = lm_frame
+                self._lm_status_device = _device_for_channel(
+                    mca_dma_control_ctx, _LM_FRAME_DEVICE_NAME, channel,
+                )
+
+
     def get_device_information(self) -> DigitizerInformation | None:
         information = getattr(self, "_device_information", None)
         return information if isinstance(information, DigitizerInformation) else None
 
     def close(self) -> None:
         log.info("IIO backend: closing ch%d", self._ch)
+        if getattr(self, "_listmode_only", False):
+            self._close_mca_dma_buffer()
+            return
         if self._scope_only:
             self._close_dma_buffer()
             return
@@ -1814,6 +1841,17 @@ class IIODigitizerBackend(DigitizerBackend):
     def mca_recovery_required(self) -> bool:
         return bool(getattr(self, "_mca_dma_fault_latched", False)
                     or getattr(self, "_mca_stop_uncertain", False))
+
+    def adopt_mca_dma_session_state(self, recovery_required: bool | None) -> None:
+        """Mirror a list-mode reader process's final latch into this backend.
+
+        The reader process owns the session's buffer and its latch; this
+        GUI-side backend still owns acknowledge_mca_dma_recovery() and the
+        pre-arm check. ``None`` means the process ended without reporting
+        (crashed), so the target state is unverified and must be latched.
+        """
+        if recovery_required is None or recovery_required:
+            self._mca_dma_fault_latched = True
 
     def acknowledge_mca_dma_recovery(self) -> None:
         """Passive acknowledgement after externally validated recovery; never reset hardware."""
