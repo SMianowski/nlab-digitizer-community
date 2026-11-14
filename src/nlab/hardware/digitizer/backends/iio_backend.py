@@ -562,6 +562,12 @@ class IIODigitizerBackend(DigitizerBackend):
         self._mca_dma_lifecycle_lock = threading.RLock()
         self._mca_dma_cancel_timer: threading.Timer | None = None
         self._mca_dma_cancel_explained = False
+        # Monotonic start of the refill currently blocked on the list-mode
+        # buffer (None while the reader is consuming, writing or parsing),
+        # and whether this session's buffer has been cancelled. A cancelled
+        # libiio buffer can never be refilled again.
+        self._mca_dma_refill_since: float | None = None
+        self._mca_dma_buf_cancelled = False
         if self._pp is not None:
             mca_dma_ctx = iio.Context(uri)
             mca_dma_control_ctx = iio.Context(uri)
@@ -1390,6 +1396,8 @@ class IIODigitizerBackend(DigitizerBackend):
         self._mca_cleanup_errors = []
         self._mca_dma_stop_requested.clear()
         self._mca_dma_cancel_explained = False
+        self._mca_dma_buf_cancelled = False
+        self._mca_dma_refill_since = None
 
         if bool(int(self._mca_dma_pp_attr_get("enable"))):
             self._mca_dma_pp_attr_set("enable", "0")
@@ -1476,24 +1484,30 @@ class IIODigitizerBackend(DigitizerBackend):
         DMA frames and the capture closed with valid continuity diagnostics.
         """
         timeout_count = 0
-        while True:
-            try:
-                nbytes: int = iio._buffer_refill(buf._buffer)
-                return nbytes
-            except OSError as exc:
-                if (
-                    exc.errno not in _LIBIIO_TIMEOUT_ERRNOS
-                    or self._mca_dma_stop_requested.is_set()
-                ):
-                    raise
-                timeout_count += 1
-                if timeout_count == 1 or timeout_count % 15 == 0:
-                    log.debug(
-                        "IIO backend ch%d: MCA list-mode refill still "
-                        "waiting for data after %d server timeout(s); retrying",
-                        self._ch,
-                        timeout_count,
-                    )
+        # Lets the stop watchdog distinguish a reader blocked without data
+        # from one that is busy consuming or writing a backlog.
+        self._mca_dma_refill_since = time.monotonic()
+        try:
+            while True:
+                try:
+                    nbytes: int = iio._buffer_refill(buf._buffer)
+                    return nbytes
+                except OSError as exc:
+                    if (
+                        exc.errno not in _LIBIIO_TIMEOUT_ERRNOS
+                        or self._mca_dma_stop_requested.is_set()
+                    ):
+                        raise
+                    timeout_count += 1
+                    if timeout_count == 1 or timeout_count % 15 == 0:
+                        log.debug(
+                            "IIO backend ch%d: MCA list-mode refill still "
+                            "waiting for data after %d server timeout(s); retrying",
+                            self._ch,
+                            timeout_count,
+                        )
+        finally:
+            self._mca_dma_refill_since = None
 
     def start_mca_dma_capture(
         self,
@@ -1603,6 +1617,10 @@ class IIODigitizerBackend(DigitizerBackend):
                 self._ch,
                 reason,
             )
+        # Set before cancelling: a refill interrupted by this call must be
+        # classified as cancellation, and a cancelled buffer must not be
+        # tail-drained (every later refill fails with EBADF).
+        self._mca_dma_buf_cancelled = True
         buf.cancel()
 
     def _drain_mca_for_close(
@@ -1641,7 +1659,8 @@ class IIODigitizerBackend(DigitizerBackend):
                         # server timeout. Final latched faults are checked too.
                         stop.wait(0.01)
                         continue
-                    if not (stop.is_set() and getattr(exc, "errno", None)
+                    cancelled = stop.is_set() or getattr(self, "_mca_dma_buf_cancelled", False)
+                    if not (cancelled and getattr(exc, "errno", None)
                             in _LM_EXPECTED_CANCEL_ERRNOS):
                         # Do not retain a traceback that owns this closure and
                         # its Buffer reference across native buffer teardown.
@@ -1712,6 +1731,11 @@ class IIODigitizerBackend(DigitizerBackend):
                     self._cancel_mca_dma_refill(buf, "joining retained DMA reader")
                 finally:
                     self._join_dma_reader("_mca_dma_reader", _LM_CLOSE_JOIN_SECONDS)
+                drain = False
+            if drain and getattr(self, "_mca_dma_buf_cancelled", False):
+                # The stop watchdog only cancels a refill that waited a full
+                # inactivity window after STOP without a frame, so there is
+                # no tail left; draining would only fail with EBADF.
                 drain = False
             if drain:
                 drained = self._drain_mca_for_close(buf, on_frame)
@@ -1842,28 +1866,45 @@ class IIODigitizerBackend(DigitizerBackend):
         with self._mca_dma_lifecycle_lock:
             if self._mca_dma_buf is None or self._mca_dma_cancel_timer is not None:
                 return
+            self._schedule_mca_dma_stop_watchdog(_LM_CLOSE_INACTIVITY_SECONDS)
 
-            timer: threading.Timer
+    def _schedule_mca_dma_stop_watchdog(self, delay: float) -> None:
+        """Cancel the reader only once one refill has waited a full window.
 
-            def cancel_inactive_refill() -> None:
-                with self._mca_dma_lifecycle_lock:
-                    if self._mca_dma_cancel_timer is not timer:
-                        return
-                    self._mca_dma_cancel_timer = None
-                    buf = self._mca_dma_buf
-                    if buf is not None:
-                        self._cancel_mca_dma_refill(
-                            buf,
-                            "stop requested and no complete frame arrived",
-                        )
+        The window counts from the start of the refill that is currently
+        blocked, not from STOP. At high rates the worker can still be
+        consuming or writing its backlog a second after STOP; cancelling
+        then destroyed a healthy buffer and the tail drain failed with
+        EBADF (seen live at ~560 kcps). While the reader is busy outside
+        refill it will reach close, which cancels this watchdog.
+        Caller holds ``_mca_dma_lifecycle_lock``.
+        """
+        timer: threading.Timer
 
-            timer = threading.Timer(
-                _LM_CLOSE_INACTIVITY_SECONDS,
-                cancel_inactive_refill,
-            )
-            timer.daemon = True
-            self._mca_dma_cancel_timer = timer
-            timer.start()
+        def check_inactive_refill() -> None:
+            with self._mca_dma_lifecycle_lock:
+                if self._mca_dma_cancel_timer is not timer:
+                    return
+                self._mca_dma_cancel_timer = None
+                buf = self._mca_dma_buf
+                if buf is None:
+                    return
+                since = getattr(self, "_mca_dma_refill_since", None)
+                waited = 0.0 if since is None else time.monotonic() - since
+                if waited < _LM_CLOSE_INACTIVITY_SECONDS:
+                    self._schedule_mca_dma_stop_watchdog(
+                        max(_LM_CLOSE_POLL_SECONDS, _LM_CLOSE_INACTIVITY_SECONDS - waited)
+                    )
+                    return
+                self._cancel_mca_dma_refill(
+                    buf,
+                    "stop requested and no complete frame arrived",
+                )
+
+        timer = threading.Timer(delay, check_inactive_refill)
+        timer.daemon = True
+        self._mca_dma_cancel_timer = timer
+        timer.start()
 
     def get_mca_dma_capture_diagnostics(self) -> tuple[int, int, int, int]:
         """Return DMA fault/error/frame/deadtime diagnostics after close.

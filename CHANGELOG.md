@@ -74,6 +74,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recognises it; real drain errors (e.g. EIO) still latch. Validated live (v124,
   ch0) for frame-limited and GUI-style stops: complete frames, no fault, gates
   released, and back-to-back captures without recovery acknowledgement.
+- Stopping MCA list-mode DMA at high rates no longer fails with
+  `Drain: [Errno 9] Bad file descriptor` and a recovery latch. The stop watchdog
+  cancelled the reader one second after STOP even when it was busy consuming or
+  writing its backlog, so the healthy buffer was cancelled and the tail drain then
+  refilled a dead descriptor. The watchdog now only cancels a refill that has itself
+  waited a full inactivity window, close skips the tail drain on an already
+  cancelled buffer, and the drain classifies EBADF after a cancel as expected.
+  Reproduced in the GUI at ~560 kcps (ch0, CC enabled); fix covered by unit tests,
+  not yet re-validated live.
 - MCA DMA blocking stop (application exit or reconnect) no longer calls
   `QThread.terminate()` after 3 s, which could bypass the list-mode drain/close
   and strand the native IIO buffer. Like Scope, it waits 5 s and otherwise leaves

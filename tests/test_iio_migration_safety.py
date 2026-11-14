@@ -396,3 +396,70 @@ def test_psd2_rejected_before_unrelated_hardware_writes(backend):
             },
         })
     assert not scope.mock_calls
+
+
+def _watchdog_backend(backend, monkeypatch):
+    monkeypatch.setattr(module, "_LM_CLOSE_INACTIVITY_SECONDS", 0.1)
+    monkeypatch.setattr(module, "_LM_CLOSE_POLL_SECONDS", 0.01)
+    cancelled = threading.Event()
+    buf = SimpleNamespace(_buffer=object(), cancel=cancelled.set)
+    backend._mca_dma_buf = buf
+    backend._mca_dma_refill_since = None
+    backend._mca_dma_buf_cancelled = False
+    monkeypatch.setattr(backend, "_mca_dma_pp_attr_get", lambda name: "0")
+    return cancelled
+
+
+def test_mca_stop_watchdog_spares_a_reader_busy_with_backlog(backend, monkeypatch):
+    # Live at ~560 kcps: one second after STOP the worker was still writing
+    # its backlog, the watchdog cancelled the healthy buffer, and the tail
+    # drain then failed with EBADF. Only a refill that has itself waited a
+    # full window may be cancelled.
+    cancelled = _watchdog_backend(backend, monkeypatch)
+    backend.request_mca_dma_stop()
+    try:
+        assert not cancelled.wait(0.35)
+        backend._mca_dma_refill_since = module.time.monotonic()
+        assert cancelled.wait(1.0)
+        assert backend._mca_dma_buf_cancelled
+    finally:
+        timer = backend._mca_dma_cancel_timer
+        if timer is not None:
+            timer.cancel()
+
+
+def test_mca_stop_watchdog_counts_from_refill_start(backend, monkeypatch):
+    cancelled = _watchdog_backend(backend, monkeypatch)
+    backend._mca_dma_refill_since = module.time.monotonic() - 1.0
+    backend.request_mca_dma_stop()
+    assert cancelled.wait(1.0)
+
+
+def test_mca_close_skips_tail_drain_on_cancelled_buffer(backend, monkeypatch):
+    native = object()
+    backend._mca_dma_buf = SimpleNamespace(_buffer=native, cancel=Mock())
+    backend._mca_dma_buf_cancelled = True
+    monkeypatch.setattr(backend, "_mca_dma_pp_attr_set", lambda *args: None)
+    monkeypatch.setattr(backend, "_drain_mca_for_close",
+                        Mock(side_effect=AssertionError("drained a cancelled buffer")))
+    monkeypatch.setattr(backend, "_wait_for_mca_dma_release", lambda: None)
+    destroy = Mock()
+    monkeypatch.setattr(iio, "_buffer_destroy", destroy)
+
+    assert backend._close_mca_dma_buffer() == 0
+    destroy.assert_called_once_with(native)
+    assert not backend.mca_recovery_required()
+
+
+def test_mca_tail_drain_treats_ebadf_after_cancel_as_expected(backend, monkeypatch):
+    monkeypatch.setattr(module, "_LM_CLOSE_INACTIVITY_SECONDS", 0.05)
+    monkeypatch.setattr(module, "_LM_CLOSE_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(module, "_LM_CLOSE_JOIN_SECONDS", 1.0)
+    buf = SimpleNamespace(_buffer=object(), cancel=Mock())
+    backend._mca_dma_buf_cancelled = True
+
+    def refill(_native):
+        raise OSError(errno.EBADF, "Bad file descriptor")
+
+    monkeypatch.setattr(iio, "_buffer_refill", refill)
+    assert backend._drain_mca_for_close(buf, None) == 0
