@@ -9,6 +9,8 @@ from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QDoubleSpinBox, QLineEdit, QSpinBox
 
+from nlab.views.app_events import application_event_hub
+
 _STEP_PROPERTY = "nlab_snap_to_step"
 _BOUND_PROPERTY = "nlab_numeric_input_bound"
 
@@ -65,30 +67,30 @@ def bind_numeric_control(spinbox: QSpinBox | QDoubleSpinBox, *, snap_to_step: bo
         spinbox.editingFinished.connect(lambda: normalize_numeric_control(spinbox))
 
 
-class _NumericInputPolicy(QObject):
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        kind = event.type()
-        if kind == QEvent.Type.KeyPress:
-            if not isinstance(event, QKeyEvent) or event.key() not in (
-                Qt.Key.Key_Return,
-                Qt.Key.Key_Enter,
-            ):
-                return False
-        elif kind != QEvent.Type.FocusOut:
-            return False
-        spinbox = watched.parent() if isinstance(watched, QLineEdit) else watched
-        if isinstance(spinbox, QSpinBox | QDoubleSpinBox) and not spinbox.isReadOnly():
-            normalize_numeric_control(spinbox)
-        # Let Qt deliver its normal commit signal exactly once.
+def _numeric_input_filter(watched: QObject, event: QEvent) -> bool:
+    """Normalize a spin box on Enter or focus loss (application event hub)."""
+    if event.type() == QEvent.Type.KeyPress and (
+        not isinstance(event, QKeyEvent)
+        or event.key() not in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+    ):
         return False
+    spinbox = watched.parent() if isinstance(watched, QLineEdit) else watched
+    if isinstance(spinbox, QSpinBox | QDoubleSpinBox) and not spinbox.isReadOnly():
+        normalize_numeric_control(spinbox)
+    # Let Qt deliver its normal commit signal exactly once.
+    return False
 
 
 def install_numeric_input_policy() -> None:
     """Cover existing and future numeric widgets, including modeless dialogs."""
     application = QApplication.instance()
-    if application is None or getattr(application, "_nlab_numeric_input_policy", None):
+    event_hub = application_event_hub()
+    if application is None or event_hub is None:
         return
-    policy = _NumericInputPolicy(application)
-    application.installEventFilter(policy)
-    # Retain the Python override for as long as the application exists.
-    setattr(application, "_nlab_numeric_input_policy", policy)
+    if getattr(application, "_nlab_numeric_input_policy", False):
+        return
+    event_hub.register(
+        application, _numeric_input_filter,
+        events=(QEvent.Type.KeyPress, QEvent.Type.FocusOut),
+    )
+    setattr(application, "_nlab_numeric_input_policy", True)

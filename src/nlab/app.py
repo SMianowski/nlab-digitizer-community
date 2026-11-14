@@ -32,6 +32,7 @@ from nlab.utils.remote_board_power import (
     ssh_arguments,
 )
 from nlab.views.about_dialog import AboutDialog
+from nlab.views.app_events import application_event_hub
 from nlab.views.connection_dialog import ConnectionDialog
 from nlab.views.connection_progress_dialog import ConnectionProgressDialog
 from nlab.views.dma_settings_dialog import (
@@ -145,9 +146,9 @@ class MainAppWindow(QMainWindow):
         )
         self.refresh_energy_calibration_indicator()
         self.refresh_measurement_indicator()
-        self._application = QApplication.instance()
-        if self._application is not None:
-            self._application.installEventFilter(self)
+        event_hub = application_event_hub()
+        if event_hub is not None:
+            event_hub.register(self, self.eventFilter, events=(QEvent.Type.KeyPress,))
         self._apply_stored_general_settings()
         if config_path is not None and not self._offline:
             if on_progress is not None:
@@ -165,10 +166,9 @@ class MainAppWindow(QMainWindow):
         help_controller = getattr(self, "_help_controller", None)
         if help_controller is not None:
             help_controller.dispose()
-        application = getattr(self, "_application", None)
-        if application is not None:
-            application.removeEventFilter(self)
-            self._application = None
+        event_hub = application_event_hub()
+        if event_hub is not None:
+            event_hub.unregister(self)
         if not getattr(self, "_offline", False) and auto_configuration_enabled():
             self._save_auto_configuration(show_error=False)
         self._save_developer_settings()
@@ -177,7 +177,7 @@ class MainAppWindow(QMainWindow):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         """Route log shortcuts to the histogram under the pointer."""
-        # Application-wide filter: only key presses can trigger a shortcut.
+        # Key-press handler on the application event hub (nlab.views.app_events).
         if event.type() != QEvent.Type.KeyPress:
             return False
         if self._try_scope_distribution_log_shortcut(event):

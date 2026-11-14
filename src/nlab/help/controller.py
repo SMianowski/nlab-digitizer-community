@@ -10,6 +10,7 @@ from PySide6.QtGui import QAction, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget
 
 from nlab.help.context import HelpContext, resolve_context
+from nlab.views.app_events import application_event_hub
 from nlab.views.help_dialog import HelpDialog
 
 log = logging.getLogger(__name__)
@@ -53,7 +54,11 @@ class HelpController(QObject):
         # Handle F1 at the application filter so modal child dialogs work too,
         # without an application-wide QAction shortcut stealing another window's F1.
         self.context_action.triggered.connect(self.set_active)
-        application.installEventFilter(self)
+        event_hub = application_event_hub()
+        if event_hub is None:
+            raise RuntimeError("Context help requires QApplication")
+        self._event_hub = event_hub
+        self._event_hub.register(self, self.eventFilter, events=_INACTIVE_EVENTS, first=True)
         window.destroyed.connect(self.dispose)
 
     def owns(self, widget: QWidget) -> bool:
@@ -74,14 +79,14 @@ class HelpController(QObject):
         self.context_action.setChecked(active)
         if active:
             HelpController._active_controller = self
-            # Dialogs created since startup may install plot shortcut filters.
-            # Qt moves an existing filter to the front when installed again.
-            self._application.installEventFilter(self)
+            # Help mode inspects every event (it runs first on the hub).
+            self._event_hub.set_events(self, None)
             QApplication.setOverrideCursor(Qt.CursorShape.WhatsThisCursor)
             self.window.statusBar().showMessage("Help mode: click a label or control. Esc cancels.")
         else:
             if self._active_controller is self:
                 HelpController._active_controller = None
+            self._event_hub.set_events(self, _INACTIVE_EVENTS)
             QApplication.restoreOverrideCursor()
             # Do not erase an acquisition status posted since help mode began.
             status = self.window.statusBar()
@@ -119,7 +124,7 @@ class HelpController(QObject):
             if self._active_controller is self:
                 HelpController._active_controller = None
             QApplication.restoreOverrideCursor()
-        self._application.removeEventFilter(self)
+        self._event_hub.unregister(self)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         kind = event.type()

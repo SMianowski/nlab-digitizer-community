@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Polling workers (MCA, Power Supply, Global diagnostics and temperature correction,
   Current IIR monitor, external devices) share one thread helper,
   `nlab/workers/worker_thread.py`, for wiring and for the never-terminate join.
+- One application-wide event filter (`nlab/views/app_events.py`) replaces the six
+  separate ones (main-window log shortcuts, context help, numeric input, and one per
+  PSD view and offline PSD plot). Each handler declares the event types it needs, so
+  ordinary paint, timer and mouse-move events no longer make a Python call per
+  feature; context help still runs first and sees every event only while help mode
+  is on.
 - The Current monitor keeps its 10 s IIR history as NumPy columns
   (`nlab/utils/sample_history.py`); the trend plot, rate, latency and zero estimates
   are vectorized instead of rebuilding Python lists of every sample each frame.

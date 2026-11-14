@@ -7,12 +7,13 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QRectF, QSignalBlocker, Qt, QTimer
 from PySide6.QtGui import QKeyEvent, QShowEvent
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QWidget
 
 from nlab.analysis.dose_calibration import PsdDoseCalibrationSnapshot
 from nlab.analysis.psd import PsdAccumulator
 from nlab.hardware.digitizer.dma import McaEventBuffer
 from nlab.ui.ui_psd_view import Ui_PSDView
+from nlab.views.app_events import application_event_hub
 from nlab.views.image_display import transparent_sparse_bins
 from nlab.views.panel_status import PanelStatus
 from nlab.views.plot_viewbox import style_plot_widget
@@ -64,9 +65,9 @@ class PSDController(QWidget):
         self._accumulator = self._make_accumulator()
         self._setup_plots()
         self._connect_signals()
-        self._application = QApplication.instance()
-        if self._application is not None:
-            self._application.installEventFilter(self)
+        event_hub = application_event_hub()
+        if event_hub is not None:
+            event_hub.register(self, self.eventFilter, events=(QEvent.Type.KeyPress,))
 
         self._timer = QTimer(self)
         self._timer.setInterval(_DISPLAY_INTERVAL_MS)
@@ -177,8 +178,7 @@ class PSDController(QWidget):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         """Handle the local log shortcut without stealing a global key."""
-        # Application-wide filter: leave every non-key event immediately
-        # (QObject.eventFilter would only return False via a C++ round trip).
+        # Key-press handler on the application event hub (nlab.views.app_events).
         if event.type() != QEvent.Type.KeyPress:
             return False
         if (
@@ -607,6 +607,6 @@ class PSDController(QWidget):
 
     def stop_processing(self) -> None:
         self._timer.stop()
-        if self._application is not None:
-            self._application.removeEventFilter(self)
-            self._application = None
+        event_hub = application_event_hub()
+        if event_hub is not None:
+            event_hub.unregister(self)

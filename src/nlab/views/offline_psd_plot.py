@@ -10,7 +10,6 @@ import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab.views.app_events import application_event_hub
 from nlab.views.image_display import transparent_sparse_bins
 from nlab.views.plot_viewbox import NLabPlotWidget, style_plot_widget
 from nlab.views.psd_fom_widget import PsdFomWidget
@@ -179,9 +179,9 @@ class OfflinePsdPlot(QWidget):
         self.cut_line.sigPositionChanged.connect(self._cut_line_changed)
         self.energy_region.sigRegionChangeFinished.connect(self._render_projections)
         self.roi_checkbox.toggled.connect(self._set_roi_visible)
-        self._application = QApplication.instance()
-        if self._application is not None:
-            self._application.installEventFilter(self)
+        event_hub = application_event_hub()
+        if event_hub is not None:
+            event_hub.register(self, self.eventFilter, events=(QEvent.Type.KeyPress,))
         wrap_widget_tooltips(self)
 
     def _set_roi_visible(self, visible: bool) -> None:
@@ -190,7 +190,7 @@ class OfflinePsdPlot(QWidget):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         """Toggle energy-projection log scale only while that plot is hovered."""
-        # Application-wide filter: leave every non-key event immediately.
+        # Key-press handler on the application event hub (nlab.views.app_events).
         if event.type() != QEvent.Type.KeyPress:
             return False
         if (
