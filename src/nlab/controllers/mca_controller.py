@@ -100,7 +100,11 @@ _MCA_CONTROL_TOOLTIPS = {
     "spinPileupWindow": "Sets the interval in which a second pulse is classified as pile-up.",
     "comboBinning": "Sets the histogram energy-bin width; larger factors combine more codes.",
     "spinTimeLimit": "Sets the acquisition duration in seconds; 0 runs until stopped.",
-    "spinRefreshRate": "Sets the requested rate for waveform, spectrum, and statistics updates.",
+    "spinRefreshRate": (
+        "Sets the requested rate for waveform, spectrum, and statistics updates. "
+        "Plots refresh at most 15 times per second; faster polling is used only "
+        "while a session recording captures every readback."
+    ),
     "spinTriggerLevel": "Sets the raw signal threshold used by the selected trigger source.",
     "spinFrameSamples": 'Diagnostic window length in nanoseconds.',
     "spinPretrigger": 'Diagnostic pretrigger offset in nanoseconds.',
@@ -2109,9 +2113,34 @@ class MCAController(QWidget):
     # Polling worker lifecycle
     # ------------------------------------------------------------------
 
+    def _effective_poll_interval_ms(self) -> int:
+        """Poll no faster than plots render unless a session records every poll.
+
+        Readbacks above _MAX_GUI_RENDER_HZ are coalesced away by _on_readback()
+        and only the session recorder consumes them. Each poll costs ~12 IIO
+        round trips (~12 ms on a LAN, measured live) and holds the shared MCA
+        configuration lock for the histogram, delaying GUI writes, so the
+        surplus is skipped while nothing records it.
+        """
+        requested_hz = self.ui.spinRefreshRate.value()
+        if not getattr(self, "_session_capture_enabled", False):
+            requested_hz = min(requested_hz, _MAX_GUI_RENDER_HZ)
+        return 1000 // max(1, requested_hz)
+
+    def _sync_worker_read_policy(self) -> None:
+        """Tell the polling worker which optional reads have a consumer."""
+        worker = getattr(self, "_worker", None)
+        if worker is None:
+            return
+        worker.read_debug_waveforms = bool(
+            getattr(self, "_session_capture_enabled", False)
+            or self.ui.plotDebug.isVisible()
+        )
+
     def _start_worker(self) -> None:
-        interval_ms = 1000 // self.ui.spinRefreshRate.value()
+        interval_ms = self._effective_poll_interval_ms()
         self._worker = MCAWorker(self._mca, interval_ms=interval_ms)
+        MCAController._sync_worker_read_policy(self)
         self._worker_thread = QThread(self)
         self._worker.moveToThread(self._worker_thread)
 
@@ -2163,8 +2192,9 @@ class MCAController(QWidget):
         del worker
 
     def _on_refresh_rate_changed(self, value: int) -> None:
+        del value  # the effective interval also depends on session capture
         if self._worker is not None:
-            self._worker.change_interval.emit(1000 // value)
+            self._worker.change_interval.emit(self._effective_poll_interval_ms())
 
     def stop_worker_sync(self) -> None:
         """Blocking stop for use during application shutdown only."""
@@ -2404,6 +2434,11 @@ class MCAController(QWidget):
         """Enable publication for future DMA runs; report current-run coverage."""
         current_run_observed = self._dma_worker is None or self._psd_capture_enabled
         self._session_capture_enabled = enabled
+        # A session records every poll at the requested rate, including debug
+        # banks; without one, polling falls back to the render-rate policy.
+        if self._worker is not None:
+            self._worker.change_interval.emit(self._effective_poll_interval_ms())
+            MCAController._sync_worker_read_policy(self)
         return current_run_observed
 
     def _on_dma_ready(self) -> None:
@@ -2622,6 +2657,9 @@ class MCAController(QWidget):
         signal = getattr(self, "session_readback", None)
         if signal is not None:
             signal.emit(self._channel, rb)
+        # Piggyback on the poll cadence: start/stop debug_data reads when the
+        # debug plot is shown or hidden (one tick of latency).
+        MCAController._sync_worker_read_policy(self)
         self._latest_readback = rb
         self._pending_readback = rb
         if not self._render_timer.isActive():

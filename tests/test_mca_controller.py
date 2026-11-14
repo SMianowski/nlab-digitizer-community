@@ -732,6 +732,45 @@ def _readback(seed: int) -> MCAReadback:
     )
 
 
+def _poll_policy_controller(requested_hz: int, *, debug_visible: bool) -> SimpleNamespace:
+    worker = SimpleNamespace(change_interval=Mock(), read_debug_waveforms=True)
+    controller = _controller(
+        _worker=worker,
+        _dma_worker=None,
+        _psd_capture_enabled=False,
+        _session_capture_enabled=False,
+        ui=SimpleNamespace(
+            spinRefreshRate=SimpleNamespace(value=lambda: requested_hz),
+            plotDebug=SimpleNamespace(isVisible=lambda: debug_visible),
+        ),
+    )
+    controller._effective_poll_interval_ms = (
+        lambda: MCAController._effective_poll_interval_ms(controller)  # type: ignore[arg-type]
+    )
+    return controller
+
+
+def test_polling_is_capped_at_render_rate_unless_a_session_records() -> None:
+    controller = _poll_policy_controller(60, debug_visible=False)
+
+    assert MCAController._effective_poll_interval_ms(controller) == 66  # type: ignore[arg-type]
+    MCAController.set_session_capture_enabled(controller, True)  # type: ignore[arg-type]
+    controller._worker.change_interval.emit.assert_called_with(16)
+    assert controller._worker.read_debug_waveforms is True  # a session records debug banks
+
+    MCAController.set_session_capture_enabled(controller, False)  # type: ignore[arg-type]
+    controller._worker.change_interval.emit.assert_called_with(66)
+    assert controller._worker.read_debug_waveforms is False  # hidden plot, no session
+
+
+def test_slow_requested_poll_rate_is_never_raised() -> None:
+    controller = _poll_policy_controller(2, debug_visible=True)
+
+    assert MCAController._effective_poll_interval_ms(controller) == 500  # type: ignore[arg-type]
+    MCAController._sync_worker_read_policy(controller)  # type: ignore[arg-type]
+    assert controller._worker.read_debug_waveforms is True
+
+
 def test_readbacks_are_coalesced_and_gui_render_rate_is_capped() -> None:
     timer = Mock()
     timer.isActive.side_effect = [False, True]

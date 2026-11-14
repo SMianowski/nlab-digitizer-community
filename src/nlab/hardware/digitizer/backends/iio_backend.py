@@ -2953,16 +2953,29 @@ class IIODigitizerBackend(DigitizerBackend):
             candidate = self.mca_parameter_snapshot() | values
             self.prepare_mca_configuration(candidate)
             self._assert_mca_idle(self._pp)
+            pp = self._pp
+            assert pp is not None
+
+            def write(name: str, value: object) -> None:
+                # The complete candidate is validated, ABI2 acknowledged and the
+                # core idle, all under mca_configuration_lock. Each store is
+                # still guarded atomically by the kernel: pp_field_store()
+                # (vdpp-pulse-processor.c, PetaLinux c546f14) rejects EBUSY
+                # while enabled/list-buffer-active, EPROTO unless the ABI ack is
+                # 2, and range/step violations. Repeating the client checks per
+                # write cost 5 extra round trips each (~200 per configuration).
+                pp.attrs[name].value = str(value)
+
             # Disable algorithms first; final admission uses the complete candidate.
             enables = [name for name in PARAMETERS if name.endswith("_enable")]
             for name in enables:
-                self._pp_attr_set(name, "0")
+                write(name, 0)
             try:
                 for name, value in candidate.items():
                     if name not in enables:
-                        self._pp_attr_set(name, str(value))
+                        write(name, value)
                 for name in enables:
-                    self._pp_attr_set(name, str(candidate[name]))
+                    write(name, candidate[name])
             except Exception:
                 self._pp_attr_set("enable", "0")
                 raise

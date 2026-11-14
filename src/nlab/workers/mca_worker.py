@@ -57,6 +57,13 @@ class MCAWorker(BaseWorker):
         self._histogram_read_failing = False
         self._waveform_read_failing = False
         self._finished = False
+        # Set from the GUI thread (a plain bool assignment is atomic): read the
+        # 8 KiB debug_data snapshot only while someone consumes it -- the
+        # visible debug plot or a session recording. While False, readbacks
+        # carry the last-known debug banks. Skipping is safe: the driver's
+        # pp_debug_snapshot_read() only toggles its publication semaphore for
+        # the copy and keeps no other state (vdpp-pulse-processor.c).
+        self.read_debug_waveforms = True
 
     def run(self) -> None:
         self._timer = QTimer()
@@ -146,6 +153,8 @@ class MCAWorker(BaseWorker):
         until the first successful read) so statistics/measurement-state
         polling keeps working even while this is failing.
         """
+        if not self.read_debug_waveforms:
+            return self._last_debug1, self._last_debug2
         try:
             self._last_debug1, self._last_debug2 = self._mca.acquire_waveforms()
             if self._waveform_read_failing:

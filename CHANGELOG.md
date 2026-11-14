@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   temperature correction, IDS ADC/DAC/TMP117, XADC rails) and the Scope viewer
   capacity are read once per connection; MCA list-mode reads the producer status
   once per frame instead of twice.
+- MCA polling: without a session recording, the poll rate is capped at the
+  15 Hz plot refresh (faster readbacks were coalesced away unseen); sessions keep
+  the requested rate. The 8 KiB debug-waveform snapshot is read only while the
+  debug plot is visible or a session records. A tick measured ~12 ms of IIO time
+  on a LAN (histogram 6 ms, nine status reads 4.7 ms, debug 1.1 ms).
+- MCA configuration loads write the validated, acknowledged, idle-checked
+  candidate without repeating the client ABI/idle checks before every store; the
+  kernel's `pp_field_store()` still guards each write. Measured live: 112 ms ->
+  37 ms per channel for 30 parameters on a LAN.
 - MCA list-mode recording: the writer queue holds 1024 frames (~16 MiB) instead
   of 32 to absorb storage stalls before the 8-block kernel ring backs up; binary
   captures hash bytes as they are written, so Stop no longer re-reads the file for

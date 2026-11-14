@@ -59,3 +59,18 @@ def test_connection_reset_during_status_read_stops_readback() -> None:
     assert "connection reset" in errors[0]
     assert readbacks == []
     finished.assert_called_once_with()
+
+
+def test_debug_waveforms_are_read_only_while_wanted() -> None:
+    mca = Mock()
+    first = (np.arange(4, dtype=np.int16), np.arange(4, dtype=np.int16) * 2)
+    mca.acquire_waveforms.return_value = first
+    worker = MCAWorker(mca)
+
+    assert worker._acquire_waveforms() == first
+    worker.read_debug_waveforms = False
+    mca.acquire_waveforms.return_value = (np.zeros(4), np.zeros(4))
+
+    # Hidden plot and no session: no 8 KiB debug read, last banks retained.
+    assert worker._acquire_waveforms() == first
+    mca.acquire_waveforms.assert_called_once_with()

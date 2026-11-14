@@ -196,6 +196,48 @@ def test_psd2_needs_advertisement_before_ack_and_keeps_integration_energy(backen
     assert backend._pp.attrs["psd_zero_crossing_mode"].value == "2"
 
 
+class _RecordingAttr:
+    def __init__(self, name: str, value: str, log: list[tuple[str, ...]]) -> None:
+        self._name, self._value, self._log = name, value, log
+
+    @property
+    def value(self) -> str:
+        self._log.append(("read", self._name))
+        return self._value
+
+    @value.setter
+    def value(self, value: str) -> None:
+        self._log.append(("write", self._name, value))
+        self._value = value
+
+
+def test_configuration_batch_checks_contract_once_and_orders_enables(backend):
+    from nlab.hardware.digitizer.mca_parameters import PARAMETERS
+
+    log: list[tuple[str, ...]] = []
+    backend._pp.attrs = {
+        name: _RecordingAttr(name, attr.value, log) for name, attr in backend._pp.attrs.items()
+    }
+    candidate = DEFAULT_PARAMETERS | {"trapezoid_r_samples": 40}
+
+    backend.configure_mca_parameters(candidate)
+
+    writes = [entry for entry in log if entry[0] == "write"]
+    enables = [name for name in PARAMETERS if name.endswith("_enable")]
+    assert writes[0] == ("write", "parameter_abi_ack", "2")
+    assert writes[1:1 + len(enables)] == [("write", name, "0") for name in enables]
+    assert writes[-len(enables):] == [
+        ("write", name, str(candidate[name])) for name in enables
+    ]
+    assert ("write", "trapezoid_r_samples", "40") in writes
+    assert len(writes) == 1 + len(PARAMETERS) + len(enables)
+    # Contract/idle guards run per batch (snapshot, prepare, re-check), not
+    # per parameter write; the kernel's pp_field_store() guards each store.
+    reads = [entry[1] for entry in log if entry[0] == "read"]
+    assert reads.count("parameter_abi_version") == 3
+    assert reads.count("measurement_in_progress") <= 2
+
+
 def test_standard_decoder_needs_no_manual_metadata_and_records_unknown_image(backend):
     identity = backend.mca_producer_identity()
     assert identity["qualified_record_schema"] == VDPP_ZC_CALC_SCHEMA
