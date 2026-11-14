@@ -956,6 +956,7 @@ def test_scope_replay_uses_recorded_timing_and_holds_at_eof(
     controller._session_scope_replay_timer = timer  # type: ignore[assignment]
     scope = SimpleNamespace(
         channel=0,
+        set_replay_hardware_interlock=Mock(),
         begin_session_replay=Mock(),
         display_session_replay_frame=Mock(),
         finish_session_replay=Mock(),
@@ -1336,21 +1337,12 @@ def test_replay_hardware_interlock_reaches_every_hardware_controller() -> None:
     controller._set_replay_hardware_interlock(True)
     controller._set_replay_hardware_interlock(False)
 
+    # One interlock contract (nlab.controllers.interlock.ReplayInterlock).
     for target in targets:
-        if target in (
-            controller._global_controller,
-            *controller._psu_controllers,
-            *controller._external_controllers,
-        ):
-            assert target.set_replay_hardware_interlock.call_args_list == [
-                call(True, resume_background=True),
-                call(False, resume_background=True),
-            ]
-        else:
-            assert target.set_replay_hardware_interlock.call_args_list == [
-                call(True),
-                call(False),
-            ]
+        assert target.set_replay_hardware_interlock.call_args_list == [
+            call(True, resume_background=True),
+            call(False, resume_background=True),
+        ]
 
 
 def test_replay_exit_joins_worker_before_restoring_views() -> None:

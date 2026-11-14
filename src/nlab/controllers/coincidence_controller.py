@@ -1411,7 +1411,9 @@ class CoincidenceController(QWidget):
     def active(self) -> bool:
         return self._state != "idle"
 
-    def set_replay_hardware_interlock(self, enabled: bool) -> None:
+    def set_replay_hardware_interlock(
+        self, enabled: bool, *, resume_background: bool = True,
+    ) -> None:
         self._replay_hardware_interlocked = bool(enabled)
         self.btnStart.setEnabled(not enabled and not self.active)
         self.duration.setEnabled(not enabled and not self.active)

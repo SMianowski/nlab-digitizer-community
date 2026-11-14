@@ -26,6 +26,7 @@ from nlab.controllers.coincidence_controller import CoincidenceController
 from nlab.controllers.current_monitor_controller import CurrentMonitorController
 from nlab.controllers.external_device_controller import ExternalDeviceController
 from nlab.controllers.global_controller import GlobalController
+from nlab.controllers.interlock import ReplayInterlock
 from nlab.controllers.mca_controller import MCAController
 from nlab.controllers.psd_controller import PSDController
 from nlab.controllers.psu_controller import PSUController
@@ -1573,46 +1574,30 @@ class MainWindowController:
         enabled = bool(enabled) or getattr(self, "_offline", False)
         if enabled == getattr(self, "_replay_hardware_interlocked", False):
             return
-        targets: list[object] = []
+        targets: list[ReplayInterlock] = []
         coincidence = getattr(self, "_coincidence_controller", None)
         if coincidence is not None:
             targets.append(coincidence)
         targets.extend(getattr(self, "_current_monitor_controllers", []))
         targets.extend(getattr(self, "_scope_controllers", []))
         targets.extend(getattr(self, "_mca_controllers", []))
-        global_controllers = self._all_global_controllers()
-        targets.extend(global_controllers)
-        psu_controllers = getattr(self, "_psu_controllers", [])
-        external_controllers = getattr(self, "_external_controllers", [])
-        targets.extend(psu_controllers)
-        targets.extend(external_controllers)
-        background_targets = {
-            id(target)
-            for target in [*global_controllers, *psu_controllers, *external_controllers]
-            if target is not None
-        }
+        targets.extend(self._all_global_controllers())
+        targets.extend(getattr(self, "_psu_controllers", []))
+        targets.extend(getattr(self, "_external_controllers", []))
 
-        applied: list[object] = []
+        applied: list[ReplayInterlock] = []
         try:
             for target in targets:
-                setter = getattr(target, "set_replay_hardware_interlock", None)
-                if setter is not None:
-                    if id(target) in background_targets:
-                        setter(enabled, resume_background=resume_background)
-                    else:
-                        setter(enabled)
-                    applied.append(target)
+                target.set_replay_hardware_interlock(
+                    enabled, resume_background=resume_background,
+                )
+                applied.append(target)
         except Exception:
             for target in reversed(applied):
-                setter = getattr(target, "set_replay_hardware_interlock", None)
-                if setter is not None:
-                    try:
-                        if id(target) in background_targets:
-                            setter(not enabled, resume_background=False)
-                        else:
-                            setter(not enabled)
-                    except Exception:
-                        log.exception("Failed to roll back replay hardware interlock")
+                try:
+                    target.set_replay_hardware_interlock(not enabled, resume_background=False)
+                except Exception:
+                    log.exception("Failed to roll back replay hardware interlock")
             raise
         self._replay_hardware_interlocked = enabled
         self._sync_coincidence_selector_enabled()

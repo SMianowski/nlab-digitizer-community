@@ -435,7 +435,9 @@ class CurrentMonitorController(QWidget):
         self._schedule_display()
         thread.start()
 
-    def set_replay_hardware_interlock(self, enabled: bool) -> None:
+    def set_replay_hardware_interlock(
+        self, enabled: bool, *, resume_background: bool = True,
+    ) -> None:
         """Stop live Current acquisition and block controls that touch Scope/IIO."""
         enabled = bool(enabled)
         if enabled == self._replay_hardware_interlocked:

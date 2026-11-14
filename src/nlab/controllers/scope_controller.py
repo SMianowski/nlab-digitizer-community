@@ -471,7 +471,9 @@ class ScopeController(QWidget):
             )
         self._dma_stopping = False
 
-    def set_replay_hardware_interlock(self, enabled: bool) -> None:
+    def set_replay_hardware_interlock(
+        self, enabled: bool, *, resume_background: bool = True,
+    ) -> None:
         """Prevent every Scope hardware action while replay data are loaded."""
         enabled = bool(enabled)
         if enabled == self._replay_hardware_interlocked:

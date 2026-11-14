@@ -270,7 +270,9 @@ class MCAController(QWidget):
         """Human-readable physical channel label supplied by the workspace."""
         return getattr(self, "display_channel_label", f"CH{self._channel}")
 
-    def set_replay_hardware_interlock(self, enabled: bool) -> None:
+    def set_replay_hardware_interlock(
+        self, enabled: bool, *, resume_background: bool = True,
+    ) -> None:
         """Stop acquisition and block every MCA hardware-setting surface."""
         enabled = bool(enabled)
         if enabled == self._replay_hardware_interlocked:
