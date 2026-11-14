@@ -7,7 +7,14 @@ from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QDoubleSpinBox, QLineEdit, QSpinBox
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QDoubleSpinBox,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+)
 
 from nlab.views.app_events import application_event_hub
 
@@ -79,6 +86,19 @@ def _numeric_input_filter(watched: QObject, event: QEvent) -> bool:
         normalize_numeric_control(spinbox)
     # Let Qt deliver its normal commit signal exactly once.
     return False
+
+
+def keep_enter_in_fields(dialog: QDialog) -> None:
+    """Stop Enter in a field from clicking a button in a dialog without OK/Cancel.
+
+    QDialog presses its default (or first auto-default) push button on
+    Enter, so Enter in a spin box also "clicked" e.g. Open, Browse or Start.
+    Call after the dialog's buttons are built; Enter then only commits the
+    field, and buttons still respond to Space and clicks.
+    """
+    for button in dialog.findChildren(QPushButton):
+        button.setAutoDefault(False)
+        button.setDefault(False)
 
 
 def install_numeric_input_policy() -> None:

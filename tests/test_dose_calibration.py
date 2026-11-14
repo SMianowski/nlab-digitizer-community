@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMainWindow
 from pytestqt.qtbot import QtBot
 
@@ -203,6 +204,10 @@ def test_dialog_records_committed_dose_and_selected_live_data(
         ]
     )
     qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.dose_rate.setFocus()
+    qtbot.keyClick(dialog.dose_rate, Qt.Key.Key_Return)
+    assert dialog._writer is None  # Enter commits the field; it never starts recording
     assert dialog.plot_curve.opts["autoDownsample"] is False
     assert dialog.plot_curve.opts["clipToView"] is False
     path = tmp_path / "dose.csv"

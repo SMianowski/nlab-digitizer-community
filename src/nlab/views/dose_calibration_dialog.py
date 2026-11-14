@@ -42,6 +42,7 @@ from nlab.analysis.dose_calibration import (
     PsuDoseCalibrationSnapshot,
     differential_spectrum_integrals,
 )
+from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.plot_viewbox import NLabPlotWidget, style_plot_widget
 
 log = logging.getLogger(__name__)
@@ -255,6 +256,7 @@ class DoseCalibrationDialog(QDialog):
         self.setMinimumSize(1_040, 620)
         self.resize(1_240, 700)
         self._build_ui()
+        keep_enter_in_fields(self)  # Enter in Dose rate must not Browse/Start
         self._connect_signals()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._record_row)

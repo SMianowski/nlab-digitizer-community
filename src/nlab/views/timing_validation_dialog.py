@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from nlab import settings_keys
 from nlab.analysis.timing_validation import TimingValidationResult
+from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.plot_viewbox import ModifierZoomViewBox
 from nlab.workers.timing_validation_worker import TimingValidationWorker
 
@@ -100,6 +101,7 @@ class TimingValidationDialog(QDialog):
         )
         warning.setWordWrap(True)
         layout.addWidget(warning)
+        keep_enter_in_fields(self)
 
     def _file_row(self, edit: QLineEdit) -> QWidget:
         row = QWidget(self)

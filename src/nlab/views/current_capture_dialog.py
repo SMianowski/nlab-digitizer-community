@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QLocale, Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenuBar,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -32,14 +33,17 @@ from nlab.analysis.current_capture import (
     CurrentCaptureInfo,
     CurrentChunk,
 )
+from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.plot_viewbox import ModifierZoomViewBox
 from nlab.workers.current_capture_worker import CurrentCaptureWorker
+
+_TITLE = "Current Capture Analysis"
 
 
 class CurrentCaptureDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Window)
-        self.setWindowTitle("Current Capture Analysis")
+        self.setWindowTitle(_TITLE)
         self.resize(1180, 850)
         self._path: Path | None = None
         self._info: CurrentCaptureInfo | None = None
@@ -47,13 +51,22 @@ class CurrentCaptureDialog(QDialog):
         self._worker: CurrentCaptureWorker | None = None
         self._generation = 0
         root = QVBoxLayout(self)
-        header = QHBoxLayout()
-        self.open_button = QPushButton("Open capture…")
-        self.file_label = QLabel("Open a periodic-sum HDF5 capture to begin.")
+        menu_bar = QMenuBar(self)
+        root.setMenuBar(menu_bar)
+        file_menu = menu_bar.addMenu("&File")
+        self.open_action = QAction("&Open capture…", self)
+        self.open_action.setShortcut(QKeySequence.StandardKey.Open)
+        file_menu.addAction(self.open_action)
+        self.export_action = QAction("&Export configuration YAML…", self)
+        self.export_action.setEnabled(False)
+        file_menu.addAction(self.export_action)
+        file_menu.addSeparator()
+        self.close_action = QAction("&Close", self)
+        self.close_action.setShortcut(QKeySequence.StandardKey.Close)
+        file_menu.addAction(self.close_action)
+        self.file_label = QLabel("Open a periodic-sum HDF5 capture (File > Open) to begin.")
         self.file_label.setTextFormat(Qt.TextFormat.PlainText)
-        header.addWidget(self.open_button)
-        header.addWidget(self.file_label, 1)
-        root.addLayout(header)
+        root.addWidget(self.file_label)
         self.capture_status = QLabel()
         self.capture_status.setWordWrap(True)
         self.capture_status.setTextFormat(Qt.TextFormat.PlainText)
@@ -219,8 +232,12 @@ class CurrentCaptureDialog(QDialog):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
         root.addWidget(self.status)
-        self.open_button.clicked.connect(self._choose_capture)
+        self.open_action.triggered.connect(self._choose_capture)
+        self.close_action.triggered.connect(self.close)
+        self.export_action.triggered.connect(self._export_configuration)
         self.export_button.clicked.connect(self._export_configuration)
+        # Enter in the Start/View size spin boxes must only commit the value.
+        keep_enter_in_fields(self)
         self.first_button.clicked.connect(lambda: self.start_spin.setValue(0))
         self.previous_button.clicked.connect(
             lambda: self.start_spin.setValue(self.start_spin.value() - self.width_spin.value())
@@ -234,6 +251,10 @@ class CurrentCaptureDialog(QDialog):
         self.average_checkbox.toggled.connect(self._average_changed)
         self.average_kernel_spin.valueChanged.connect(self._average_changed)
         self._update_navigation()
+
+    def _set_export_enabled(self, enabled: bool) -> None:
+        self.export_button.setEnabled(enabled)
+        self.export_action.setEnabled(enabled)
 
     @staticmethod
     def _time_spin(minimum: float, maximum: float) -> QDoubleSpinBox:
@@ -265,11 +286,12 @@ class CurrentCaptureDialog(QDialog):
         self._path = Path(path)
         self._info = self._chunk = None
         self.file_label.setText(str(path))
+        self.setWindowTitle(f"{Path(path).name} — {_TITLE}")
         self.capture_status.clear()
         self.configuration_text.clear()
         self.metadata_text.clear()
         self.configuration_status.setText("Reading capture configuration…")
-        self.export_button.setEnabled(False)
+        self._set_export_enabled(False)
         self._clear_chunk_plots()
         self.start_spin.blockSignals(True)
         self.start_spin.setValue(0)
@@ -338,7 +360,7 @@ class CurrentCaptureDialog(QDialog):
             if info.configuration_yaml
             else "No embedded digitizer configuration. Older files remain readable."
         )
-        self.export_button.setEnabled(bool(info.configuration_yaml))
+        self._set_export_enabled(bool(info.configuration_yaml))
         self.metadata_text.setPlainText(
             json.dumps(
                 {

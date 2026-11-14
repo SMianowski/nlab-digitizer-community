@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Polling workers (MCA, Power Supply, Global diagnostics and temperature correction,
   Current IIR monitor, external devices) share one thread helper,
   `nlab/workers/worker_thread.py`, for wiring and for the never-terminate join.
+- Current Capture Analysis has a **File** menu (Open capture… Ctrl+O, Export
+  configuration YAML…, Close Ctrl+W) instead of an Open button, and its title bar
+  names the open capture file.
 - The System Log console batches records: the handler buffers formatted lines
   (bounded, oldest dropped with a visible count) and wakes the GUI once per burst; the
   console appends the batch in one edit block every 50 ms at most and scrolls once.
@@ -154,6 +157,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   immutable DMA record instead of copying it.
 
 ### Fixed
+
+- Pressing Enter in a field no longer clicks a button in the Current Capture Analysis,
+  Dose Calibration Logger, Timing Validation and Waveform Analysis windows (Qt's dialog
+  default button had made Enter in a spin box press Open, Browse, Start CSV recording or
+  Download report). Enter now only commits the value.
 
 - MCA polling, Power Supply and external-device threads are no longer killed with
   `QThread.terminate()` when they do not stop within 3 s at shutdown or reconnect;

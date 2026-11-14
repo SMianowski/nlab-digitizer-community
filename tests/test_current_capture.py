@@ -6,15 +6,19 @@ import math
 import struct
 import threading
 from pathlib import Path
+from unittest.mock import Mock
 
 import h5py
 import numpy as np
 import pytest
 import yaml
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QPushButton
 
 from nlab.analysis import current_capture as reader
 from nlab.analysis.capture_metadata import capture_digitizer_info
 from nlab.hardware.digitizer.scope_sums import MASK64, ScopeSumWriter, decode_sum_packet
+from nlab.views import current_capture_dialog
 from nlab.views.current_capture_dialog import CurrentCaptureDialog
 from nlab.workers import current_capture_worker as worker_module
 
@@ -234,6 +238,39 @@ def test_dialog_navigation_configuration_export_and_close(qtbot, capture_file, t
     dialog.open_path(path)
     qtbot.waitUntil(lambda: dialog._chunk is not None and dialog._worker is not None)
     dialog.close_without_prompt()
+
+
+def test_enter_in_spin_box_only_commits_and_title_names_the_file(
+    qtbot, capture_file, monkeypatch,
+):
+    path, _ = capture_file()
+    dialog = CurrentCaptureDialog()
+    qtbot.addWidget(dialog)
+    dialog.width_spin.setValue(10)
+    chooser = Mock(return_value=("", ""))
+    monkeypatch.setattr(current_capture_dialog.QFileDialog, "getOpenFileName", chooser)
+    dialog.show_workspace()
+    assert dialog.windowTitle() == "Current Capture Analysis"
+    assert not dialog.export_action.isEnabled()
+    dialog.open_path(path)
+    try:
+        qtbot.waitUntil(lambda: dialog._chunk is not None)
+        assert dialog.windowTitle() == f"{path.name} — Current Capture Analysis"
+        assert dialog.export_action.isEnabled() == dialog.export_button.isEnabled()
+        assert not any(
+            button.autoDefault() or button.isDefault()
+            for button in dialog.findChildren(QPushButton)
+        )
+        dialog.start_spin.setFocus()
+        dialog.start_spin.lineEdit().setText("10")
+        qtbot.keyClick(dialog.start_spin, Qt.Key.Key_Return)
+        qtbot.waitUntil(lambda: dialog._chunk.start_us == 10)
+        assert dialog.isVisible()
+        chooser.assert_not_called()  # Enter never reaches a button
+        dialog.open_action.trigger()
+        chooser.assert_called_once()
+    finally:
+        dialog.close_without_prompt()
 
 
 def test_dialog_keeps_legacy_and_incomplete_captures_readable(qtbot, capture_file):

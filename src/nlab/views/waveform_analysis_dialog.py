@@ -55,6 +55,7 @@ from nlab.analysis.waveform_psd import (
 from nlab.help.context import HelpContext
 from nlab.views.gui_gc import install_gui_garbage_collector
 from nlab.views.help_dialog import HelpDialog
+from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.offline_psd_plot import OfflinePsdPlot
 from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE, ModifierZoomViewBox, style_plot_widget
 from nlab.views.time_axis import time_axis_scale
@@ -142,6 +143,7 @@ class WaveformAnalysisDialog(QDialog):
         self._auto_preview_timer.setSingleShot(True)
         self._auto_preview_timer.setInterval(_AUTO_PREVIEW_DEBOUNCE_MS)
         self._build_ui()
+        keep_enter_in_fields(self)
         self._fit_initial_size_to_screen()
 
     def _fit_initial_size_to_screen(self) -> None:
