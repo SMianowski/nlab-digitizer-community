@@ -524,3 +524,30 @@ def test_recorded_run_paths_pair_channels_without_overwriting(
     controller._session_manifest.touch()
     with pytest.raises(FileExistsError):
         controller._prepare_paths(mode)
+
+
+def test_live_render_shows_the_analysis_thread_fit_without_fitting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, _, _ = _make_controller(monkeypatch)
+    gui_fit = Mock(side_effect=AssertionError("fit must not run on the GUI thread"))
+    monkeypatch.setattr(coincidence_module, "fit_coincidence_peak", gui_fit)
+    fit = CoincidencePeakFit(
+        center_ns=0.1, sigma_ns=0.2, fwhm_ns=0.471, fwhm_uncertainty_ns=0.01,
+        amplitude_per_bin=50.0, background_per_bin=1.0, signal_counts=500.0,
+        reduced_chi_square=0.9, fit_low_ns=-4.0, fit_high_ns=4.0,
+    )
+    snapshot = CoincidenceAnalyzer(CoincidenceSettings()).snapshot()
+    published: list[CoincidencePeakFit | None] = [None]
+    controller._analysis = SimpleNamespace(  # type: ignore[assignment]
+        result=lambda: (snapshot, None), timing_fit=lambda: published[0],
+    )
+
+    controller._render()
+    assert controller._last_rendered_snapshot is snapshot
+    published[0] = fit  # the thread finished a fit for the same snapshot
+    controller._render()
+
+    assert "FWHM 471" in controller.timing_fit_label.text()
+    gui_fit.assert_not_called()
+    controller._analysis = None

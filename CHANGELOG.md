@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Polling workers (MCA, Power Supply, Global diagnostics and temperature correction,
   Current IIR monitor, external devices) share one thread helper,
   `nlab/workers/worker_thread.py`, for wiring and for the never-terminate join.
+- The live Coincidence Gaussian timing fit (scipy `curve_fit`) runs on the
+  coincidence analysis thread instead of the GUI thread: at most every 0.5 s while
+  data streams, and once more on the drained snapshot before the thread exits.
 - One application-wide event filter (`nlab/views/app_events.py`) replaces the six
   separate ones (main-window log shortcuts, context help, numeric input, and one per
   PSD view and offline PSD plot). Each handler declares the event types it needs, so

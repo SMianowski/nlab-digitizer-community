@@ -1123,14 +1123,15 @@ class CoincidenceController(QWidget):
             return
         self._finish_timer.stop()
         if self._analysis is not None:
-            final_snapshot, analysis_error = self._analysis.result()
+            _, analysis_error = self._analysis.result()
             if analysis_error is not None:
                 self._run_error = f"{self._run_error or 'Analysis'}; {analysis_error}"
             pair_mode = self._current_settings.operator == "AND" and not (
                 self._current_settings.not_ch0 or self._current_settings.not_ch1
             )
             if pair_mode:
-                self._render_timing_fit(final_snapshot, self._current_settings)
+                # The thread fitted the drained snapshot before it exited.
+                self._display_timing_fit(self._analysis.timing_fit(), self._current_settings)
         for channel, view in enumerate(self._mca_views):
             summary = view.coincidence_run_summary
             if summary is None or summary.continuity != "verified":
@@ -1198,9 +1199,10 @@ class CoincidenceController(QWidget):
         if analysis is None:
             return
         snapshot, error = analysis.result()
+        timing_fit = analysis.timing_fit()
         if error is not None and self._is_live:
             self._begin_stop(error)
-        if snapshot is self._last_rendered_snapshot:
+        if snapshot is self._last_rendered_snapshot and timing_fit is self._timing_fit:
             return
         try:
             settings = self._settings()
@@ -1213,7 +1215,8 @@ class CoincidenceController(QWidget):
                 left_ns + np.arange(len(snapshot.delay_counts) + 1) * settings.bin_width_ns,
                 snapshot.delay_counts,
             )
-            self._render_timing_fit(snapshot, settings)
+            # Fitted on the analysis thread (CoincidenceAnalysisThread.timing_fit).
+            self._display_timing_fit(timing_fit, settings)
         else:
             self.delay_fit_curve.setData([], [])
             self._timing_fit = None

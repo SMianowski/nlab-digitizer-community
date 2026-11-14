@@ -401,3 +401,39 @@ def test_fanout_consumers_report_independent_queue_overflow() -> None:
         psd.append(_events((tick, 40, 0)))
     assert psd.drain()[1] == 1
     assert coincidence.drain()[1] == 2
+
+
+@pytest.mark.parametrize(("operator", "fits"), [("AND", True), ("OR", False)])
+def test_analysis_thread_fits_the_drained_snapshot_off_the_caller_thread(
+    monkeypatch: pytest.MonkeyPatch, operator: str, fits: bool,
+) -> None:
+    import threading
+
+    from nlab.workers import coincidence_worker
+    from nlab.workers.coincidence_worker import CoincidenceAnalysisThread
+
+    fit_threads: list[str] = []
+    sentinel = object()
+
+    def fake_fit(delay_counts: np.ndarray, settings: CoincidenceSettings) -> object:
+        fit_threads.append(threading.current_thread().name)
+        return sentinel
+
+    monkeypatch.setattr(coincidence_worker, "fit_coincidence_peak", fake_fit)
+    ch0, ch1 = McaEventBuffer(), McaEventBuffer()
+    ch0.append(_events((100, 40, 0), (900, 40, 0)))
+    ch1.append(_events((101, 40, 0), (901, 40, 0)))
+    worker = CoincidenceAnalysisThread(ch0, ch1, CoincidenceSettings(operator=operator))
+    worker.start()
+    worker.request_stop()
+    worker.join(timeout=10)
+
+    snapshot, error = worker.result()
+    assert error is None
+    if fits:
+        assert snapshot.pairs == 2
+        assert fit_threads and set(fit_threads) == {"coincidence-analysis"}
+        assert worker.timing_fit() is sentinel
+    else:
+        assert fit_threads == []
+        assert worker.timing_fit() is None
