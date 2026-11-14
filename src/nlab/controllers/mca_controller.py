@@ -52,6 +52,7 @@ from nlab.views.time_axis import format_duration_ns, time_axis_scale
 from nlab.workers.base_worker import pause_requests
 from nlab.workers.dma_workers import IIOMcaDmaWorker
 from nlab.workers.mca_worker import MCAReadback, MCAWorker
+from nlab.workers.worker_thread import create_worker_thread, join_worker_thread
 
 log = logging.getLogger(__name__)
 
@@ -2154,22 +2155,14 @@ class MCAController(QWidget):
             self._mca, interval_ms=interval_ms, paused=self._readbacks_paused(),
         )
         MCAController._sync_worker_read_policy(self)
-        self._worker_thread = QThread(self)
-        self._worker.moveToThread(self._worker_thread)
-
-        self._worker_thread.started.connect(self._worker.run)
+        # _on_worker_finished() still uses the thread object; it deletes it.
+        self._worker_thread = create_worker_thread(
+            self, self._worker, on_finished=self._on_worker_finished,
+            delete_thread_on_finish=False,
+        )
         self._worker.readback.connect(self._on_readback)
         self._worker.error.connect(self._on_connection_lost)
         self._worker.measurement_done.connect(self._on_measurement_done)
-        self._worker.finished.connect(
-            self._worker_thread.quit,
-            Qt.ConnectionType.DirectConnection,
-        )
-        self._worker_thread.finished.connect(self._worker.deleteLater)
-        self._worker_thread.finished.connect(
-            self._on_worker_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
 
         self._worker_thread.start()
 
@@ -2214,13 +2207,18 @@ class MCAController(QWidget):
         worker = self._worker
         thread = self._worker_thread
         if worker is not None:
-            worker.request_stop.emit()
+            try:
+                worker.request_stop.emit()
+            except RuntimeError:
+                # thread.finished already deleted the worker; its queued
+                # _on_worker_finished() has not run yet.
+                log.debug("MCA ch%d: polling worker already finished", self._channel)
         if thread is not None:
-            if not thread.wait(3000):
-                log.warning("MCA worker thread did not stop in time, terminating")
-                thread.terminate()
-                thread.wait()
-            thread.deleteLater()
+            join_worker_thread(thread, label=f"MCA ch{self._channel} polling")
+            try:
+                thread.deleteLater()
+            except RuntimeError:
+                pass  # already deleted
         self._worker_thread = None
         self._worker = None
 

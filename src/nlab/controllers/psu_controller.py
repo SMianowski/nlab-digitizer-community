@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QWidget
 
 from nlab.analysis.dose_calibration import PsuDoseCalibrationSnapshot
@@ -17,6 +17,7 @@ from nlab.views.responsive_layout import configure_psu_layout
 from nlab.views.spec_binding import bind_double_spinbox
 from nlab.workers.base_worker import pause_requests
 from nlab.workers.psu_worker import PSUReadback, PSUWorker
+from nlab.workers.worker_thread import create_worker_thread, join_worker_thread
 
 log = logging.getLogger(__name__)
 
@@ -290,22 +291,11 @@ class PSUController(QWidget):
             interval_ms=interval_ms,
         )
         self._worker.set_initial_paused(pause_requests(self).active)
-        self._worker_thread = QThread(self)
         self._worker_stop_requested = False
-        self._worker.moveToThread(self._worker_thread)
-
-        self._worker_thread.started.connect(self._worker.run)
+        self._worker_thread = create_worker_thread(
+            self, self._worker, on_finished=self._on_monitor_finished,
+        )
         self._worker.readback.connect(self._on_readback)
-        self._worker.finished.connect(
-            self._worker_thread.quit,
-            Qt.ConnectionType.DirectConnection,
-        )
-        self._worker_thread.finished.connect(self._worker.deleteLater)
-        self._worker_thread.finished.connect(self._worker_thread.deleteLater)
-        self._worker_thread.finished.connect(
-            self._on_monitor_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
 
         self.ui.btnStartMonitor.setEnabled(False)
         self.ui.btnStopMonitor.setEnabled(True)
@@ -356,11 +346,7 @@ class PSUController(QWidget):
         """Blocking stop for use during application shutdown only."""
         thread = self._worker_thread
         self.request_monitor_stop()
-        if thread is not None:
-            if not thread.wait(3000):
-                log.warning("PSU worker thread did not stop in time, terminating")
-                thread.terminate()
-                thread.wait()
+        join_worker_thread(thread, label="PSU monitor")
         self._worker_thread = None
         self._worker = None
         self._worker_stop_requested = False

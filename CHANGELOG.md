@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Polling workers (MCA, Power Supply, Global diagnostics and temperature correction,
+  Current IIR monitor, external devices) share one thread helper,
+  `nlab/workers/worker_thread.py`, for wiring and for the never-terminate join.
 - All QSettings keys live in `nlab/settings_keys.py` (values unchanged, so existing
   user settings still apply) and the measurement folder is read through one helper.
 - Scope offers the **Periodic** (timed) waveform trigger again, with its periodic
@@ -127,6 +130,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCA polling, Power Supply and external-device threads are no longer killed with
+  `QThread.terminate()` when they do not stop within 3 s at shutdown or reconnect;
+  termination could interrupt a network IIO/Modbus call mid-transaction. Like the
+  Global and Current workers, they now wait for the in-flight call (bounded by its
+  transport timeout) and log that they are waiting.
 - Automatically named Scope DMA recordings can no longer overwrite an earlier file.
   Scope used a per-launch counter without an existence check, so a restart within the
   same second reused a name. Scope, MCA and Current sum recordings now share one rule

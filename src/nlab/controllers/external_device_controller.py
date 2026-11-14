@@ -23,6 +23,7 @@ from nlab.ui.ui_external_device_view import Ui_ExternalDeviceView
 from nlab.views.numeric_controls import bind_numeric_control
 from nlab.views.responsive_layout import configure_external_layout
 from nlab.workers.external_device_worker import ExternalDeviceWorker
+from nlab.workers.worker_thread import create_worker_thread, join_worker_thread
 
 log = logging.getLogger(__name__)
 
@@ -539,22 +540,11 @@ class ExternalDeviceController(QWidget):
         if self._replay_hardware_interlocked:
             return
         self._worker = ExternalDeviceWorker(self.device, interval_ms=interval_ms)
-        self._worker_thread = QThread(self)
         self._worker_stop_requested = False
-        self._worker.moveToThread(self._worker_thread)
-
-        self._worker_thread.started.connect(self._worker.run)
+        self._worker_thread = create_worker_thread(
+            self, self._worker, on_finished=self._on_polling_finished,
+        )
         self._worker.readback.connect(self._on_readback)
-        self._worker.finished.connect(
-            self._worker_thread.quit,
-            Qt.ConnectionType.DirectConnection,
-        )
-        self._worker_thread.finished.connect(self._worker.deleteLater)
-        self._worker_thread.finished.connect(self._worker_thread.deleteLater)
-        self._worker_thread.finished.connect(
-            self._on_polling_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
 
         self._worker_thread.start()
         log.info("External device polling started: %s", self.device.connection_info())
@@ -595,11 +585,7 @@ class ExternalDeviceController(QWidget):
         """Blocking stop for use during application shutdown only."""
         thread = self._worker_thread
         self.request_polling_stop()
-        if thread is not None:
-            if not thread.wait(3000):
-                log.warning("External device worker thread did not stop in time, terminating")
-                thread.terminate()
-                thread.wait()
+        join_worker_thread(thread, label="External device polling")
         self._worker_thread = None
         self._worker = None
         self._worker_stop_requested = False

@@ -45,6 +45,7 @@ from nlab.workers.current_monitor_worker import (
     CurrentSampleBuffer,
 )
 from nlab.workers.scope_sum_worker import ScopeSumWorker
+from nlab.workers.worker_thread import create_worker_thread, join_worker_thread
 
 if TYPE_CHECKING:
     from nlab.controllers.scope_controller import ScopeController
@@ -412,23 +413,14 @@ class CurrentMonitorController(QWidget):
             self._sample_buffer,
             target_hz=_TARGET_SAMPLE_HZ,
         )
-        thread = QThread(self)
+        thread = create_worker_thread(self, worker, on_finished=self._on_worker_finished)
         self._worker = worker
         self._worker_thread = thread
         self._stop_requested = False
         self._monitor_error = None
         self._last_dma_render_generation = -1
         self._calibration_dirty = True
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
         worker.error.connect(self._on_worker_error)
-        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(
-            self._on_worker_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
         self._set_running_controls(True)
         self.status.setText("Opening an isolated current-monitor connection…")
         self._next_display_ns = time.perf_counter_ns() + self._display_period_ns
@@ -727,13 +719,9 @@ class CurrentMonitorController(QWidget):
             return
 
         self.request_monitor_stop()
-        thread = self._worker_thread
-        if thread is not None and not thread.wait(4000):
-            # A remote attribute read is synchronous. Never close its context
-            # from another thread; wait for the bounded transport call to
-            # return instead of using QThread.terminate().
-            log.warning("Waiting for in-flight current-monitor IIO read to finish")
-            thread.wait()
+        # A remote attribute read is synchronous: never close its context from
+        # another thread; wait for the bounded transport call to return.
+        join_worker_thread(self._worker_thread, label="Current monitor", warn_after_ms=4000)
         self._worker = None
         self._worker_thread = None
         self._stop_requested = False
