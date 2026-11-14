@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Polling workers (MCA, Power Supply, Global diagnostics and temperature correction,
   Current IIR monitor, external devices) share one thread helper,
   `nlab/workers/worker_thread.py`, for wiring and for the never-terminate join.
+- Session replay playback (state, the four playback timers and ~950 lines) moved out
+  of the main window into `nlab/controllers/session_replay_coordinator.py`. The main
+  window keeps the public replay API and the shared hardware interlock; replay
+  behaviour is unchanged and covered by end-to-end tests that record a real session
+  and replay it in an offline window.
 - All QSettings keys live in `nlab/settings_keys.py` (values unchanged, so existing
   user settings still apply) and the measurement folder is read through one helper.
 - Scope offers the **Periodic** (timed) waveform trigger again, with its periodic
