@@ -678,3 +678,96 @@ def test_unknown_producer_refuses_decoded_consumers_before_arm():
     with pytest.raises(RuntimeError, match="opaque binary"):
         streamer.stream_events(threading.Event(), event_buffer=McaEventBuffer())
     backend.start_mca_dma_capture.assert_not_called()
+
+
+class _FakeFastStreamBackend(_FakeBackend):
+    """Delivers frames as fast as possible; counts producer-status reads."""
+
+    def __init__(self, stop_event: threading.Event, *, frames: int,
+                 stop_after: bool, status_error: bool = False) -> None:
+        super().__init__(stop_event)
+        self.frames_left = frames
+        self.stop_after = stop_after
+        self.status_error = status_error
+        self.status_reads = 0
+        self.producer_running = True
+        self.unblock = threading.Event()
+        self.diagnostics = (0, 0, frames + 2, 0)
+
+    def start_mca_dma_capture(
+        self,
+        on_started: Callable[[], None] | None = None,
+    ) -> np.ndarray:
+        if on_started is not None:
+            on_started()
+        return self.first
+
+    def read_mca_dma_frame(self) -> np.ndarray:
+        if self.frames_left:
+            self.frames_left -= 1
+            if not self.frames_left:
+                if self.stop_after:
+                    self._stop_event.set()
+                else:
+                    self.producer_running = False  # hardware time limit
+            return _frame(3)
+        # A refill after the producer's final frame blocks until the STOP
+        # watchdog cancels it (modelled by request_mca_dma_stop).
+        assert self.unblock.wait(2.0), "blocked refill was never released"
+        return np.empty(0, dtype=_LM_EVENT_DTYPE)
+
+    def mca_dma_measurement_in_progress(self) -> bool:
+        self.status_reads += 1
+        if self.status_error and self.status_reads > 1:
+            raise OSError(5, "status read failed")
+        return self.producer_running
+
+    def request_mca_dma_stop(self) -> None:
+        super().request_mca_dma_stop()
+        self.unblock.set()
+
+
+def test_streamer_does_not_read_producer_status_per_frame(monkeypatch: Any) -> None:
+    import nlab.hardware.digitizer.dma as dma_module
+
+    monkeypatch.setattr(dma_module, "_MCA_PRODUCER_POLL_SECONDS", 0.5)
+    stop_event = threading.Event()
+    backend = _FakeFastStreamBackend(stop_event, frames=2000, stop_after=True)
+    streamer = IIOMcaDmaStreamer(backend, channel=0)
+
+    total = streamer.stream_events(stop_event=stop_event)
+
+    assert total == (1 + 2000 + 1) * 1024
+    # Live, one status round trip per frame cost ~30% of the record rate.
+    assert backend.status_reads <= 3
+
+
+def test_streamer_ends_on_hardware_time_limit_without_gui_stop(monkeypatch: Any) -> None:
+    import nlab.hardware.digitizer.dma as dma_module
+
+    monkeypatch.setattr(dma_module, "_MCA_PRODUCER_POLL_SECONDS", 0.01)
+    stop_event = threading.Event()
+    backend = _FakeFastStreamBackend(stop_event, frames=50, stop_after=False)
+    streamer = IIOMcaDmaStreamer(backend, channel=0)
+
+    total = streamer.stream_events(stop_event=stop_event)
+
+    assert not stop_event.is_set()
+    assert backend.stop_requests == 1
+    assert total == (1 + 50 + 1) * 1024  # first, streamed and drained tail
+    assert streamer.last_capture_diagnostics["continuity_valid"] is True
+
+
+def test_streamer_fails_when_producer_status_read_fails(monkeypatch: Any) -> None:
+    import nlab.hardware.digitizer.dma as dma_module
+
+    monkeypatch.setattr(dma_module, "_MCA_PRODUCER_POLL_SECONDS", 0.01)
+    stop_event = threading.Event()
+    backend = _FakeFastStreamBackend(
+        stop_event, frames=0, stop_after=False, status_error=True,
+    )
+    streamer = IIOMcaDmaStreamer(backend, channel=0)
+
+    with pytest.raises(OSError, match="status read failed"):
+        streamer.stream_events(stop_event=stop_event)
+    assert backend.stop_requests == 1

@@ -6,6 +6,7 @@ worker threads. Readers retain support for legacy NDMA v1 capture files.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
@@ -101,6 +102,11 @@ SCOPE_ADC_SAMPLE_PERIOD_NS = 2
 _IIO_SCOPE_WRITE_QUEUE_FRAMES = 256
 _IIO_SCOPE_WRITE_QUEUE_POLL_SECONDS = 0.050
 _IIO_SCOPE_WRITER_STOP = object()
+# Producer-status poll period during MCA list mode. A per-frame status read
+# cost 0.56 ms of a 1.86 ms frame live (v121, ~530 kcps), i.e. ~30% of the
+# achievable record rate; 20 reads/s keep time-limit detection prompt.
+_MCA_PRODUCER_POLL_SECONDS = 0.050
+_MCA_PRODUCER_WATCH_JOIN_SECONDS = 2.0
 
 _EVENT_DTYPE = np.dtype(
     [
@@ -877,6 +883,40 @@ class IIOMcaDmaStreamer:
 
         failure: BaseException | None = None
         cleanup_errors: list[dict[str, int | str]] = []
+        producer_done = threading.Event()
+        watch_stop = threading.Event()
+        watch_errors: list[tuple[int, str]] = []
+        watcher: threading.Thread | None = None
+        backend = self._backend
+
+        def watch_producer() -> None:
+            # Hardware time-limit completion can occur before the GUI's stop
+            # request arrives, and a refill entered after the producer's final
+            # frame would block forever. Poll the producer off the data path;
+            # on completion end the loop and start the ordinary STOP, whose
+            # watchdog cancels only a refill that then waits a full
+            # inactivity window without data, so the in-band tail is kept.
+            while not watch_stop.wait(_MCA_PRODUCER_POLL_SECONDS):
+                try:
+                    if backend.mca_dma_measurement_in_progress():
+                        continue
+                    producer_done.set()
+                except BaseException as exc:
+                    # Scalar error data only; see AGENTS.md threading rules.
+                    watch_errors.append((getattr(exc, "errno", None) or errno.EIO, str(exc)))
+                    producer_done.set()
+                try:
+                    backend.request_mca_dma_stop()
+                except BaseException as exc:
+                    watch_errors.append((getattr(exc, "errno", None) or errno.EIO, str(exc)))
+                return
+
+        def stop_watcher() -> None:
+            watch_stop.set()
+            if watcher is not None:
+                watcher.join(_MCA_PRODUCER_WATCH_JOIN_SECONDS)
+                if watcher.is_alive():
+                    log.warning("IIO MCA DMA: producer-status watcher did not stop")
 
         def retain_failure(phase: str, error: BaseException) -> None:
             nonlocal failure
@@ -896,19 +936,27 @@ class IIOMcaDmaStreamer:
             first = self._backend.start_mca_dma_capture(on_started=on_ready)
             if len(first):
                 consume(first)
-            # Hardware time-limit completion can occur before the GUI polling
-            # worker delivers its queued stop request. Check the producer
-            # after every complete frame so no refill is entered once it has
-            # stopped (it could block forever). One status read per frame:
-            # the post-frame check also gates the next iteration's refill.
-            in_progress = self._backend.mca_dma_measurement_in_progress()
-            while in_progress and not stop_event.is_set():
-                frame = self._backend.read_mca_dma_frame()
-                if len(frame):
-                    consume(frame)
-                in_progress = self._backend.mca_dma_measurement_in_progress()
+            # One synchronous check after the first frame (a short time limit
+            # can already be complete), then the watcher above replaces the
+            # former per-frame status round trip.
+            if self._backend.mca_dma_measurement_in_progress():
+                watcher = threading.Thread(
+                    target=watch_producer,
+                    name=f"vdpp-lm-frame-ch{self._channel}-producer-watch",
+                    daemon=True,
+                )
+                watcher.start()
+                while not (stop_event.is_set() or producer_done.is_set()):
+                    frame = self._backend.read_mca_dma_frame()
+                    if len(frame):
+                        consume(frame)
         except BaseException as exc:
             retain_failure("Capture", exc)
+        # The watcher may call request_mca_dma_stop(); it must be finished
+        # before close starts the tail drain, or its watchdog could cancel it.
+        stop_watcher()
+        if watch_errors:
+            retain_failure("Producer status", OSError(*watch_errors[0]))
         # Healthy STOP preserves accepted tail frames. Fault cleanup must not
         # refill a failed descriptor or expose its contents as new payload.
         try:

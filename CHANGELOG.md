@@ -83,6 +83,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cancelled buffer, and the drain classifies EBADF after a cancel as expected.
   Reproduced in the GUI at ~560 kcps (ch0, CC enabled); fix covered by unit tests,
   not yet re-validated live.
+- MCA list-mode streaming no longer reads `measurement_in_progress` after every
+  16 KiB frame (0.56 ms of a 1.86 ms frame live, ~30% of the per-frame budget). A
+  watcher thread polls it every 50 ms on the control context; on a hardware
+  time-limit stop it ends the loop and starts the ordinary STOP, so the in-band
+  tail is still drained. Validated live (v121, ch0): user stop and 2 s time limit,
+  continuity valid, streamed = completed frames.
 - MCA DMA blocking stop (application exit or reconnect) no longer calls
   `QThread.terminate()` after 3 s, which could bypass the list-mode drain/close
   and strand the native IIO buffer. Like Scope, it waits 5 s and otherwise leaves
