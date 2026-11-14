@@ -2442,7 +2442,7 @@ class MCAController(QWidget):
         return current_run_observed
 
     def _on_dma_ready(self) -> None:
-        # The backend emits ready only after it has armed all eight kernel
+        # The backend emits ready only after it has armed all kernel
         # blocks, entered the first blocking refill and written enable=1. A
         # GUI-thread mca.start() here would duplicate backend ownership.
         MCAController._set_measurement_active(self, True)

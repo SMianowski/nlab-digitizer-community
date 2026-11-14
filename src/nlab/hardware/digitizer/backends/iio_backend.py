@@ -110,7 +110,14 @@ _LM_FRAME_RECORDS = 1024
 _LM_RECORD_BYTES = 16
 _LM_FRAME_BYTES = _LM_FRAME_RECORDS * _LM_RECORD_BYTES
 _LM_IP_VERSION = 121
-_LM_KERNEL_BUFFER_COUNT = 8
+# PetaLinux's reference value is eight blocks (~15 ms at ~530 kcps). Live on
+# v121 ch0 (2026-11-14) a bare reader with no GUI still saw 20-50 ms stalls
+# that emptied the kernel queue (queued_blocks -> 0) and the IP dropped
+# records: 8 blocks lost 784-60k records per 10-30 s run, 32 blocks dropped
+# once in five runs, 64 blocks none in four (queue minimum 57). 64 x 16 KiB is
+# 1 MiB of coherent DMA memory per channel; the driver uses the generic
+# iio_dma_buffer block allocator and treats eight only as the reference.
+_LM_KERNEL_BUFFER_COUNT = 64
 # Old or capability-unknown Scope images must retain one block.  The current
 # provider-qualified driver advertises a recommended/max depth through IIO;
 # use that only after validating the complete capability tuple.
@@ -1433,7 +1440,8 @@ class IIODigitizerBackend(DigitizerBackend):
         # user-api.md's production lifecycle and mca_listmode_capture.py both
         # require several mmap blocks so the driver can rearm Simple DMA from
         # its completion callback without a network round-trip. Eight is the
-        # reference value; unlike vdpp_scope, list mode must not force one.
+        # reference value; this client uses more for stall tolerance (see
+        # _LM_KERNEL_BUFFER_COUNT). Unlike vdpp_scope, never force one.
         lm_frame.set_kernel_buffers_count(_LM_KERNEL_BUFFER_COUNT)
         self._validate_lm_geometry()
 
@@ -1465,7 +1473,7 @@ class IIODigitizerBackend(DigitizerBackend):
                 if name in lm_frame.attrs
             )
             raise RuntimeError(
-                "failed to arm vdpp_lm_frame after selecting eight kernel "
+                f"failed to arm vdpp_lm_frame after selecting {_LM_KERNEL_BUFFER_COUNT} kernel "
                 "blocks and validating the single opaque 16-byte scan with "
                 "1024 records; the target rejected buffer creation"
                 + (f" ({diagnostics})" if diagnostics else "")

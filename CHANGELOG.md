@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process dies mid-capture, the child still stops the MCA, drains, closes and
   writes a valid file (validated live). Start-up adds ~0.45 s before Ready.
   `NLAB_LISTMODE_IN_PROCESS=1` restores the in-process reader for diagnostics.
+- MCA list mode now arms 64 kernel blocks (1 MiB per channel) instead of the
+  PetaLinux reference value of eight. Live on v121 ch0, even a reader with no GUI
+  saw 20-50 ms stalls that emptied eight blocks (`queued_blocks` 0) and the IP
+  dropped 784-60k records per 10-30 s run; 32 blocks dropped once in five runs, 64
+  blocks never (queue minimum 57). Both channels together with 64 blocks and a busy
+  GUI-side thread: 15.5 M records in 30 s, no FPGA or live-view drops. Capture
+  metadata records the new `kernel_buffers` value.
 - Current HDF5 sum recordings default to the measurement folder from General
   Settings. A blank filename generates `chN_current_<timestamp>.h5` on Start;
   relative names use that folder and explicit absolute paths retain their location.

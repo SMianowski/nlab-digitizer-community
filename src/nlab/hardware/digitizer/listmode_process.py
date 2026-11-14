@@ -5,8 +5,8 @@ Why a process
 Measured live (v121, ch0, ~530 kcps, online only): the in-process reader kept
 up on its own, but one CPU-busy Python thread next to it cut 3 s of reading
 from ~1550 to ~60 frames. Every libiio call releases the interpreter lock and
-the reader must then win it back from the busy thread, while the eight kernel
-blocks (8192 records) cover only ~15 ms at that rate, so the FPGA drops
+the reader must then win it back from the busy thread, while the eight (then
+reference) kernel blocks covered only ~15 ms at that rate, so the FPGA drops
 records. GUI rendering is exactly such a thread. A child process has its own
 interpreter lock, so the GUI can no longer starve the reader.
 

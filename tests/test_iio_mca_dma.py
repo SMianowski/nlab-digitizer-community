@@ -771,3 +771,10 @@ def test_streamer_fails_when_producer_status_read_fails(monkeypatch: Any) -> Non
     with pytest.raises(OSError, match="status read failed"):
         streamer.stream_events(stop_event=stop_event)
     assert backend.stop_requests == 1
+
+
+def test_capture_metadata_records_the_kernel_block_count_the_backend_arms() -> None:
+    from nlab.hardware.digitizer.dma import IIO_LM_KERNEL_BUFFER_COUNT
+
+    # Live v121 stalls of 20-50 ms emptied eight blocks; 64 absorbed them.
+    assert IIO_LM_KERNEL_BUFFER_COUNT == _LM_KERNEL_BUFFER_COUNT == 64

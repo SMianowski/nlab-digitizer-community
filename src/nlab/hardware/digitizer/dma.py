@@ -85,7 +85,8 @@ IIO_LM_FILE_VERSION = 2
 IIO_LM_FRAME_RECORDS = 1024
 IIO_LM_RECORD_BYTES = 16
 IIO_LM_FRAME_BYTES = IIO_LM_FRAME_RECORDS * IIO_LM_RECORD_BYTES
-IIO_LM_KERNEL_BUFFER_COUNT = 8
+# Recorded in capture metadata; must equal iio_backend._LM_KERNEL_BUFFER_COUNT.
+IIO_LM_KERNEL_BUFFER_COUNT = 64
 IIO_LM_CLIENT_SCHEMA = VDPP_ZC_CALC_SCHEMA
 IIO_LM_UNQUALIFIED_SCHEMA = "unqualified-opaque[16]"
 
@@ -1056,7 +1057,7 @@ class IIOMcaDmaStreamer:
 
         try:
             # Backend readiness is a hardware lifecycle boundary, not merely
-            # worker-thread startup: arm all eight kernel blocks, enter the
+            # worker-thread startup: arm all kernel blocks, enter the
             # first refill, enable the pulse processor, then notify the GUI.
             first = self._backend.start_mca_dma_capture(on_started=on_ready)
             if len(first):
