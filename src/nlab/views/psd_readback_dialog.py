@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab import settings_keys
 from nlab.analysis.capture_metadata import capture_digitizer_info
 from nlab.analysis.psd import PsdAccumulator
 from nlab.analysis.psd_file import PsdEventFileInfo, inspect_psd_event_file
@@ -214,7 +215,7 @@ class PsdReadbackDialog(QDialog):
                                 "See System Log for details.")
 
     def _choose_file(self) -> None:
-        folder = str(QSettings().value("analysis/psd_event_folder", "measurements"))
+        folder = str(QSettings().value(settings_keys.ANALYSIS_PSD_EVENT_FOLDER, "measurements"))
         path_text, _ = QFileDialog.getOpenFileName(
             self,
             "Open PSD Event File",
@@ -246,7 +247,7 @@ class PsdReadbackDialog(QDialog):
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "PSD File Load Failed", str(exc))
             return
-        QSettings().setValue("analysis/psd_event_folder", str(path.parent))
+        QSettings().setValue(settings_keys.ANALYSIS_PSD_EVENT_FOLDER, str(path.parent))
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -359,7 +360,9 @@ class PsdReadbackDialog(QDialog):
                 "Load a PSD file and complete the FOM fit before creating a report.",
             )
             return
-        default_folder = str(QSettings().value("analysis/psd_report_folder", str(info.path.parent)))
+        default_folder = str(
+            QSettings().value(settings_keys.ANALYSIS_PSD_REPORT_FOLDER, str(info.path.parent))
+        )
         selected = QFileDialog.getExistingDirectory(
             self,
             "Select PSD Report Destination",
@@ -411,7 +414,7 @@ class PsdReadbackDialog(QDialog):
             return
         finally:
             QApplication.restoreOverrideCursor()
-        QSettings().setValue("analysis/psd_report_folder", selected)
+        QSettings().setValue(settings_keys.ANALYSIS_PSD_REPORT_FOLDER, selected)
         self.status.setText(f"PSD report saved to {bundle.directory}.")
         QMessageBox.information(
             self,

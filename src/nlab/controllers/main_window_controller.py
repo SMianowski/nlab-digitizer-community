@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab import settings_keys
 from nlab.controllers.coincidence_controller import CoincidenceController
 from nlab.controllers.current_monitor_controller import CurrentMonitorController
 from nlab.controllers.external_device_controller import ExternalDeviceController
@@ -1119,14 +1120,14 @@ class MainWindowController:
 
     # Bump a state-key suffix when its format or object-name scheme changes.
     # Runtime dock-count changes are handled by the per-host topology signatures.
-    _DOCK_STATE_KEY_SCOPE = "docks/v2/scope"
-    _DOCK_STATE_KEY_CURRENT = "docks/v1/current"
-    _DOCK_STATE_KEY_MCA = "docks/v2/mca"
-    _DOCK_STATE_KEY_PSD = "docks/v2/psd"
-    _DOCK_STATE_KEY_PSU = "docks/v2/psu"
-    _DOCK_STATE_KEY_GLOBAL = "docks/v2/global"
-    _DOCK_STATE_KEY_EXTERNAL = "docks/v2/external"
-    _DOCK_TOPOLOGY_KEY_PREFIX = "docks/topology/v1"
+    _DOCK_STATE_KEY_SCOPE = settings_keys.DOCK_STATE_SCOPE
+    _DOCK_STATE_KEY_CURRENT = settings_keys.DOCK_STATE_CURRENT
+    _DOCK_STATE_KEY_MCA = settings_keys.DOCK_STATE_MCA
+    _DOCK_STATE_KEY_PSD = settings_keys.DOCK_STATE_PSD
+    _DOCK_STATE_KEY_PSU = settings_keys.DOCK_STATE_PSU
+    _DOCK_STATE_KEY_GLOBAL = settings_keys.DOCK_STATE_GLOBAL
+    _DOCK_STATE_KEY_EXTERNAL = settings_keys.DOCK_STATE_EXTERNAL
+    _DOCK_TOPOLOGY_KEY_PREFIX = settings_keys.DOCK_TOPOLOGY_PREFIX
 
     def _dock_state_hosts(self) -> tuple[tuple[str, str, QMainWindow], ...]:
         """Return persistent layout names, keys, and their current dock hosts."""

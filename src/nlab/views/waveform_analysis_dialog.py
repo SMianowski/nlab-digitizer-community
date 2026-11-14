@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab import settings_keys
 from nlab.analysis.capture_metadata import capture_digitizer_info
 from nlab.analysis.waveform_cluster_export import ClusterFormat
 from nlab.analysis.waveform_file import MappedWaveformFile, WaveformFileIndex, WaveformFrame
@@ -678,7 +679,7 @@ class WaveformAnalysisDialog(QDialog):
         return line
 
     def _choose_file(self) -> None:
-        folder = str(QSettings().value("analysis/waveform_folder", "measurements"))
+        folder = str(QSettings().value(settings_keys.ANALYSIS_WAVEFORM_FOLDER, "measurements"))
         path_text, _ = QFileDialog.getOpenFileName(
             self,
             "Open Waveform File",
@@ -717,7 +718,7 @@ class WaveformAnalysisDialog(QDialog):
         self._set_indexing(True)
         self.status.setText(f"Indexing {path.name}...")
         self.progress.setValue(0)
-        QSettings().setValue("analysis/waveform_folder", str(path.parent))
+        QSettings().setValue(settings_keys.ANALYSIS_WAVEFORM_FOLDER, str(path.parent))
         thread.start()
 
     @Slot()
@@ -1665,7 +1666,7 @@ class WaveformAnalysisDialog(QDialog):
             )
             return
         default_folder = str(
-            QSettings().value("analysis/waveform_report_folder", str(index.path.parent))
+            QSettings().value(settings_keys.ANALYSIS_WAVEFORM_REPORT_FOLDER, str(index.path.parent))
         )
         selected = QFileDialog.getExistingDirectory(
             self,
@@ -1746,7 +1747,7 @@ class WaveformAnalysisDialog(QDialog):
             return
         finally:
             QApplication.restoreOverrideCursor()
-        QSettings().setValue("analysis/waveform_report_folder", selected)
+        QSettings().setValue(settings_keys.ANALYSIS_WAVEFORM_REPORT_FOLDER, selected)
         self.status.setText(f"Waveform PSD report saved to {bundle.directory}.")
         QMessageBox.information(
             self,

@@ -8,6 +8,7 @@ from PySide6.QtCore import QSettings, Qt, QThread, QTime, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHeaderView, QTableWidgetItem, QWidget
 
+from nlab import settings_keys
 from nlab.analysis.dose_calibration import DigitizerTemperatureSnapshot
 from nlab.hardware.digitizer.diagnostics import GlobalDiagnosticReading
 from nlab.hardware.digitizer.digitizer import Digitizer
@@ -28,11 +29,11 @@ log = logging.getLogger(__name__)
 class GlobalController(QWidget):
     """Global digitizer controls shared by every MCA channel."""
 
-    _INTERVAL_SETTINGS_KEY = "global/diagnostics_interval_ms"
-    _TEMPERATURE_INTERVAL_SETTINGS_KEY = "global/temperature_interval_ms"
-    _TEMPERATURE_COEFFICIENT_SETTINGS_KEY = "global/temperature_coefficient"
-    _TEMPERATURE_OFFSET_SETTINGS_KEY = "global/temperature_offset"
-    _TEMPERATURE_ENABLED_SETTINGS_KEY = "global/temperature_enabled"
+    _INTERVAL_SETTINGS_KEY = settings_keys.GLOBAL_DIAGNOSTICS_INTERVAL_MS
+    _TEMPERATURE_INTERVAL_SETTINGS_KEY = settings_keys.GLOBAL_TEMPERATURE_INTERVAL_MS
+    _TEMPERATURE_COEFFICIENT_SETTINGS_KEY = settings_keys.GLOBAL_TEMPERATURE_COEFFICIENT
+    _TEMPERATURE_OFFSET_SETTINGS_KEY = settings_keys.GLOBAL_TEMPERATURE_OFFSET
+    _TEMPERATURE_ENABLED_SETTINGS_KEY = settings_keys.GLOBAL_TEMPERATURE_ENABLED
     session_temperature_readback = Signal(object)
     session_diagnostics_readback = Signal(object)
 

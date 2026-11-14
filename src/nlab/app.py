@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from nlab import __version__
+from nlab import __version__, settings_keys
 from nlab.controllers.main_window_controller import MainWindowController
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode
 from nlab.hardware.modbus_devices import ExternalDeviceScan
@@ -61,16 +61,16 @@ License: MIT<br>
 Source: <a href="{GITHUB_REPOSITORY_URL}">github.com/nucliflare/nlab-digitizer-community</a>
 """
 
-_KEY_SHOW_LOG = "developer/show_system_log"
-_KEY_DEBUG_MODE = "developer/debug_mode"
+_KEY_SHOW_LOG = settings_keys.DEVELOPER_SHOW_SYSTEM_LOG
+_KEY_DEBUG_MODE = settings_keys.DEVELOPER_DEBUG_MODE
 _KEY_DMA_FOLDER = DMA_FOLDER_KEY
 _KEY_MCA_DMA_OUTPUT_MODE = MCA_DMA_OUTPUT_MODE_KEY
-_KEY_SHOW_ROI = "view/show_roi"
-_KEY_DIFFERENTIAL_HISTOGRAM = "view/differential_histogram"
-_KEY_LOG_Y = "view/log_y"
-_KEY_SCOPE_DISTRIBUTION = "view/scope_distribution"
-_KEY_TIMING_OFFSET_NS = "timing/channel_b_offset_ns"
-_KEY_SESSION_FOLDER = "session/last_folder"
+_KEY_SHOW_ROI = settings_keys.VIEW_SHOW_ROI
+_KEY_DIFFERENTIAL_HISTOGRAM = settings_keys.VIEW_DIFFERENTIAL_HISTOGRAM
+_KEY_LOG_Y = settings_keys.VIEW_LOG_Y
+_KEY_SCOPE_DISTRIBUTION = settings_keys.VIEW_SCOPE_DISTRIBUTION
+_KEY_TIMING_OFFSET_NS = settings_keys.TIMING_CHANNEL_B_OFFSET_NS
+_KEY_SESSION_FOLDER = settings_keys.SESSION_LAST_FOLDER
 _GENERAL_CONTROLLER_KEYS = {
     "scope_display_mode": "general/scope_display_mode",
     "scope_persistence": "general/scope_persistence",

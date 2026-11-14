@@ -19,10 +19,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab import settings_keys
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode
 
-DMA_FOLDER_KEY = "dma/save_folder"
-MCA_DMA_OUTPUT_MODE_KEY = "dma/mca_output_mode"
+DMA_FOLDER_KEY = settings_keys.DMA_SAVE_FOLDER
+MCA_DMA_OUTPUT_MODE_KEY = settings_keys.MCA_DMA_OUTPUT_MODE
 
 
 class DmaSettingsDialog(QDialog):

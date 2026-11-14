@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab import settings_keys
 from nlab.analysis.dose_calibration import (
     DigitizerTemperatureSnapshot,
     DoseCalibrationCsvWriter,
@@ -45,7 +46,7 @@ from nlab.views.plot_viewbox import NLabPlotWidget, style_plot_widget
 
 log = logging.getLogger(__name__)
 
-_OUTPUT_FOLDER_KEY = "analysis/dose_calibration_folder"
+_OUTPUT_FOLDER_KEY = settings_keys.ANALYSIS_DOSE_CALIBRATION_FOLDER
 _MAX_PLOT_POINTS = 10_000
 _DOSE_UNIT_TO_SV_PER_H = {
     "nSv/h": 1.0e-9,

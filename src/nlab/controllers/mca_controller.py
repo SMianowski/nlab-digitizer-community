@@ -15,6 +15,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QDoubleSpinBox, QFileDialog, QSlider, QSpinBox, QWidget
 
+from nlab import settings_keys
 from nlab.acquisition_policy import MCA_FIXED_LOW_PASS_PRESET
 from nlab.analysis.dose_calibration import McaDoseCalibrationSnapshot
 from nlab.analysis.energy_calibration import (
@@ -32,6 +33,11 @@ from nlab.hardware.digitizer.mca import (
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode, McaRunSummary
 from nlab.hardware.digitizer.scope import RangeSpec
 from nlab.ui.ui_mca_view import Ui_MCAView
+from nlab.utils.recording_paths import (
+    available_path,
+    measurement_folder,
+    unique_recording_path,
+)
 from nlab.views.energy_axis import CalibratedEnergyAxis
 from nlab.views.mca_roi_history_dialog import (
     DoubleClickableLinearRegionItem,
@@ -189,7 +195,6 @@ class MCAController(QWidget):
         self._dma_worker: IIOMcaDmaWorker | None = None
         self._dma_thread: QThread | None = None
         self._dma_filepath: Path | None = None
-        self._dma_counter = 0
         self._connection_lost = False
         self._measurement_active = False
         self._event_buffer = event_buffer or McaEventBuffer()
@@ -2074,7 +2079,7 @@ class MCAController(QWidget):
             log.warning("MCA ch%d: no spectrum to export", self._channel)
             return
 
-        default_dir = str(QSettings().value("dma/save_folder", "measurements"))
+        default_dir = str(measurement_folder())
         ts = time.strftime("%Y%m%d_%H%M%S")
         default_name = f"{default_dir}/ch{self._channel}_spectrum_{ts}.csv"
         path, _ = QFileDialog.getSaveFileName(
@@ -2249,7 +2254,9 @@ class MCAController(QWidget):
 
     @staticmethod
     def _output_mode() -> McaDmaOutputMode:
-        stored = str(QSettings().value("dma/mca_output_mode", McaDmaOutputMode.BINARY.value))
+        stored = str(
+            QSettings().value(settings_keys.MCA_DMA_OUTPUT_MODE, McaDmaOutputMode.BINARY.value)
+        )
         try:
             return McaDmaOutputMode(stored)
         except ValueError:
@@ -2257,28 +2264,20 @@ class MCAController(QWidget):
             return McaDmaOutputMode.BINARY
 
     @staticmethod
+    def _sidecar_suffixes(mode: McaDmaOutputMode) -> tuple[str, ...]:
+        """Files written next to a capture; a new capture must not reuse them."""
+        return (".run.json", ".yaml") if mode is McaDmaOutputMode.BINARY else (".run.json",)
+
+    @staticmethod
     def _available_filepath(path: Path, *, binary_yaml: bool) -> Path:
         """Return a collision-free path without ever replacing a prior measurement."""
-        candidate = path
-        counter = 1
-        while (
-            candidate.exists()
-            or candidate.with_suffix(".run.json").exists()
-            or (binary_yaml and candidate.with_suffix(".yaml").exists())
-        ):
-            candidate = path.with_name(f"{path.stem}_{counter:03d}{path.suffix}")
-            counter += 1
-        return candidate
+        mode = McaDmaOutputMode.BINARY if binary_yaml else McaDmaOutputMode.HDF5
+        return available_path(path, sidecar_suffixes=MCAController._sidecar_suffixes(mode))
 
     def _generate_filepath(self, mode: McaDmaOutputMode) -> Path:
-        folder = Path(str(QSettings().value("dma/save_folder", "measurements")))
-        folder.mkdir(parents=True, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        self._dma_counter += 1
-        name = f"ch{self._channel}_{ts}_{self._dma_counter:03d}{mode.extension}"
-        filepath = self._available_filepath(
-            folder / name,
-            binary_yaml=mode is McaDmaOutputMode.BINARY,
+        filepath = unique_recording_path(
+            f"ch{self._channel}", mode.extension,
+            sidecar_suffixes=self._sidecar_suffixes(mode),
         )
         log.info("MCA DMA: auto-generated filepath: %s", filepath)
         return filepath
@@ -2288,7 +2287,7 @@ class MCAController(QWidget):
         if mode is McaDmaOutputMode.ONLINE:
             self.status.setText("Online PSD mode does not create a file.")
             return
-        default_dir = str(QSettings().value("dma/save_folder", "measurements"))
+        default_dir = str(measurement_folder())
         filters = {
             McaDmaOutputMode.BINARY: "Binary NDMA files (*.bin)",
             McaDmaOutputMode.ROOT: "ROOT files (*.root)",

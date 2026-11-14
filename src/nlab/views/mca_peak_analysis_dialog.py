@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab import settings_keys
 from nlab.analysis.n42 import export_n42_peak_fit, export_n42_spectrum
 from nlab.analysis.peak_fitting import (
     BackgroundModel,
@@ -78,7 +79,7 @@ _FIT_REGION_Z = 20.0
 _REFERENCE_LINE_Z = 25.0
 _PEAK_MARKER_Z = 30.0
 _REFERENCE_COLORS = ("#c23b22", "#0072b2", "#009e73", "#cc79a7", "#e69f00", "#6f4e7c")
-_REFERENCE_FAVOURITES_KEY = "analysis/radionuclide_reference_favourites"
+_REFERENCE_FAVOURITES_KEY = settings_keys.ANALYSIS_RADIONUCLIDE_FAVOURITES
 _DEFAULT_REFERENCE_FAVOURITES = (
     "Cs-137",
     "Na-22",
@@ -1247,7 +1248,7 @@ class McaPeakAnalysisDialog(QDialog):
         self._selection_changed()
 
     def _load_files(self) -> None:
-        folder = str(QSettings().value("analysis/spectrum_folder", "measurements"))
+        folder = str(QSettings().value(settings_keys.ANALYSIS_SPECTRUM_FOLDER, "measurements"))
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Load MCA Spectra",
@@ -1268,7 +1269,7 @@ class McaPeakAnalysisDialog(QDialog):
                 loaded += len(spectra)
             except (OSError, ValueError) as exc:
                 failures.append(f"{path.name}: {exc}")
-        QSettings().setValue("analysis/spectrum_folder", str(Path(paths[0]).parent))
+        QSettings().setValue(settings_keys.ANALYSIS_SPECTRUM_FOLDER, str(Path(paths[0]).parent))
         if self.source_list.count() and self.source_list.currentRow() < 0:
             self.source_list.setCurrentRow(0)
         if failures:
@@ -1531,7 +1532,7 @@ class McaPeakAnalysisDialog(QDialog):
         spectrum = self._current_spectrum()
         if spectrum is None:
             return
-        folder = str(QSettings().value("analysis/spectrum_folder", "measurements"))
+        folder = str(QSettings().value(settings_keys.ANALYSIS_SPECTRUM_FOLDER, "measurements"))
         path_text, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Export Spectrum",
@@ -1553,7 +1554,7 @@ class McaPeakAnalysisDialog(QDialog):
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "Spectrum Export Failed", str(exc))
             return
-        QSettings().setValue("analysis/spectrum_folder", str(Path(path_text).parent))
+        QSettings().setValue(settings_keys.ANALYSIS_SPECTRUM_FOLDER, str(Path(path_text).parent))
         self.workbench_status.setText(f"Spectrum exported to {path}")
 
     def _export_fit_result(self) -> None:
@@ -1561,7 +1562,7 @@ class McaPeakAnalysisDialog(QDialog):
         spectrum = self._spectra.get(self._fit_spectrum_id or "")
         if result is None or spectrum is None:
             return
-        folder = str(QSettings().value("analysis/spectrum_folder", "measurements"))
+        folder = str(QSettings().value(settings_keys.ANALYSIS_SPECTRUM_FOLDER, "measurements"))
         path_text, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Export Peak Fit Results",
@@ -1615,7 +1616,7 @@ class McaPeakAnalysisDialog(QDialog):
             )
             return
         default_folder = str(
-            QSettings().value("analysis/peak_fit_report_folder", "measurements")
+            QSettings().value(settings_keys.ANALYSIS_PEAK_FIT_REPORT_FOLDER, "measurements")
         )
         selected = QFileDialog.getExistingDirectory(
             self,
@@ -1637,7 +1638,7 @@ class McaPeakAnalysisDialog(QDialog):
             log.exception("Could not create MCA peak-fitting report")
             QMessageBox.critical(self, "Peak-Fitting Report Failed", str(exc))
             return
-        QSettings().setValue("analysis/peak_fit_report_folder", selected)
+        QSettings().setValue(settings_keys.ANALYSIS_PEAK_FIT_REPORT_FOLDER, selected)
         self.workbench_status.setText(f"Peak-fitting report saved to {bundle.directory}.")
         QMessageBox.information(
             self,

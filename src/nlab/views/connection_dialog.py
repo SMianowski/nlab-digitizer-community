@@ -8,6 +8,7 @@ from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QWidget
 
+from nlab import settings_keys
 from nlab.hardware.digitizer.discovery import (
     USB_GADGET_HOST,
     DiscoveredDigitizer,
@@ -24,11 +25,11 @@ _DEFAULT_CHANNELS = 2
 _DEFAULT_PORT = 30431
 _DISCOVERY_ROLE = Qt.ItemDataRole.UserRole
 
-_KEY_RECENT_IPS = "connection/recent_ips"
-_KEY_IIO_PORT = "connection/iio_port"
-_KEY_LAST_CHANNELS = "connection/last_channels"
-_LEGACY_KEY_LAST_BACKEND = "connection/last_backend"
-_LEGACY_KEY_LAST_PORT = "connection/last_port"
+_KEY_RECENT_IPS = settings_keys.CONNECTION_RECENT_IPS
+_KEY_IIO_PORT = settings_keys.CONNECTION_IIO_PORT
+_KEY_LAST_CHANNELS = settings_keys.CONNECTION_LAST_CHANNELS
+_LEGACY_KEY_LAST_BACKEND = settings_keys.LEGACY_CONNECTION_LAST_BACKEND
+_LEGACY_KEY_LAST_PORT = settings_keys.LEGACY_CONNECTION_LAST_PORT
 
 
 class ConnectionDialog(QDialog):

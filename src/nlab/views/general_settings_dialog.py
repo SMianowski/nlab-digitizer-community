@@ -25,9 +25,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab import settings_keys
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode
 
-AUTO_CONFIGURATION_ENABLED_KEY = "configuration/auto_save_enabled"
+AUTO_CONFIGURATION_ENABLED_KEY = settings_keys.CONFIGURATION_AUTO_SAVE_ENABLED
 AUTO_CONFIGURATION_DIRECTORY = "device-configurations"
 
 

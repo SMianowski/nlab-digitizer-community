@@ -12,7 +12,6 @@ import pytest
 from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 
-from nlab.controllers import current_monitor_controller as current_module
 from nlab.controllers.current_monitor_controller import CurrentMonitorController
 from nlab.controllers.scope_controller import ScopeController
 from nlab.hardware.digitizer import scope_sums
@@ -25,6 +24,7 @@ from nlab.hardware.digitizer.scope_sums import (
     ScopeSumWriter,
     decode_sum_packet,
 )
+from nlab.utils import recording_paths
 
 
 def _packet():
@@ -90,7 +90,8 @@ def _close(device, scope, current):
 def sum_save_settings(monkeypatch, tmp_path):
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     settings.setValue("dma/save_folder", str(tmp_path / "measurements"))
-    monkeypatch.setattr(current_module, "QSettings", lambda: settings)
+    # The measurement folder is resolved by the shared recording-path rule.
+    monkeypatch.setattr(recording_paths, "QSettings", lambda: settings)
     return settings
 
 
@@ -99,9 +100,9 @@ def sum_save_settings(monkeypatch, tmp_path):
 def test_blank_sum_filename_generates_fresh_channel_path_on_start(
     qtbot, monkeypatch, tmp_path, sum_save_settings, channel, blank,
 ):
-    clock = Mock(wraps=current_module.time)
+    clock = Mock(wraps=recording_paths.time)
     clock.strftime.return_value = "20261113_140506"
-    monkeypatch.setattr(current_module, "time", clock)
+    monkeypatch.setattr(recording_paths, "time", clock)
     question = Mock(side_effect=AssertionError("Automatic names must not replace existing files"))
     monkeypatch.setattr(QMessageBox, "question", question)
     device, scope, current, _ = _views(qtbot, monkeypatch, channel=channel)

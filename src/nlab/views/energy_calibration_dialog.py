@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab import settings_keys
 from nlab.analysis.energy_calibration import (
     CalibrationModel,
     CalibrationPeakFit,
@@ -869,7 +870,9 @@ class EnergyCalibrationDialog(QDialog):
             )
             return
         default_folder = str(
-            QSettings().value("analysis/energy_calibration_report_folder", "measurements")
+            QSettings().value(
+                settings_keys.ANALYSIS_ENERGY_CALIBRATION_REPORT_FOLDER, "measurements"
+            )
         )
         selected = QFileDialog.getExistingDirectory(
             self,
@@ -909,7 +912,7 @@ class EnergyCalibrationDialog(QDialog):
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "Energy Calibration Report Failed", str(exc))
             return
-        QSettings().setValue("analysis/energy_calibration_report_folder", selected)
+        QSettings().setValue(settings_keys.ANALYSIS_ENERGY_CALIBRATION_REPORT_FOLDER, selected)
         self.snapshot_status.setText(f"Energy calibration report saved to {bundle.directory}.")
         QMessageBox.information(
             self,

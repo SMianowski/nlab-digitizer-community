@@ -22,6 +22,7 @@ from nlab.hardware.digitizer.iio_listmode import (
     VDPP_ZC_CALC_SCHEMA,
 )
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode
+from nlab.utils import recording_paths
 from nlab.views.plot_viewbox import ModifierZoomViewBox
 
 
@@ -510,7 +511,7 @@ def test_recorded_run_paths_pair_channels_without_overwriting(
 ) -> None:
     controller, _, _ = _make_controller(monkeypatch)
     monkeypatch.setattr(
-        coincidence_module,
+        recording_paths,
         "QSettings",
         lambda: SimpleNamespace(value=lambda _key, _default=None: str(tmp_path)),
     )

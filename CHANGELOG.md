@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- All QSettings keys live in `nlab/settings_keys.py` (values unchanged, so existing
+  user settings still apply) and the measurement folder is read through one helper.
 - Scope offers the **Periodic** (timed) waveform trigger again, with its periodic
   gap control enabled only in that mode, reverting the Scope part of the 0.8.4
   restriction. Structured periodic sums remain a Current-only acquisition.
@@ -125,6 +127,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Automatically named Scope DMA recordings can no longer overwrite an earlier file.
+  Scope used a per-launch counter without an existence check, so a restart within the
+  same second reused a name. Scope, MCA and Current sum recordings now share one rule
+  (`<prefix>_<YYYYmmdd_HHMMSS>.<ext>`, then `_001`, `_002`, ... while the file or any
+  of its sidecars exists); the always-present `_001` suffix of Scope/MCA names is gone.
 - Stopping a batched-iiod Scope DMA capture no longer reports a DMA fault
   ("Stopped (recovered from DMA fault)", `Drain: [WinError 10053]`). Cancelling the
   dedicated READBUF socket surfaces a platform-specific error (WSAECONNABORTED or

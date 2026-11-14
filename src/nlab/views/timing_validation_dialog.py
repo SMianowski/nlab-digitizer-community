@@ -21,12 +21,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nlab import settings_keys
 from nlab.analysis.timing_validation import TimingValidationResult
 from nlab.views.plot_viewbox import ModifierZoomViewBox
 from nlab.workers.timing_validation_worker import TimingValidationWorker
 
 _FILE_FILTER = "NLab MCA events (*.bin *.h5 *.hdf5 *.root);;All files (*)"
-_OFFSET_SETTINGS_KEY = "timing/channel_b_offset_ns"
+_OFFSET_SETTINGS_KEY = settings_keys.TIMING_CHANNEL_B_OFFSET_NS
 
 
 class TimingValidationDialog(QDialog):

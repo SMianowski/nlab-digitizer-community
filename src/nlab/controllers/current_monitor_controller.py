@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QLocale, QSettings, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QLocale, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
@@ -28,6 +28,7 @@ from nlab.hardware.digitizer.scope import (
     ScopeParam,
 )
 from nlab.ui.ui_current_monitor_view import Ui_CurrentMonitorView
+from nlab.utils.recording_paths import measurement_folder, unique_recording_path
 from nlab.views.current_capture_dialog import CurrentCaptureDialog
 from nlab.views.numeric_controls import (
     bind_numeric_control,
@@ -567,20 +568,12 @@ class CurrentMonitorController(QWidget):
                 output = output.with_suffix(".h5")
             if output.is_absolute():
                 return output
-        folder = Path(str(QSettings().value("dma/save_folder", "measurements"))).expanduser()
         if filename:
-            return folder / output
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        stem = f"ch{self._channel}_current_{timestamp}"
-        output = folder / f"{stem}.h5"
-        counter = 1
-        while output.exists():
-            output = folder / f"{stem}_{counter:03d}.h5"
-            counter += 1
-        return output
+            return measurement_folder() / output
+        return unique_recording_path(f"ch{self._channel}_current", ".h5", create_folder=False)
 
     def _choose_sum_output(self) -> None:
-        folder = str(QSettings().value("dma/save_folder", "measurements"))
+        folder = str(measurement_folder())
         filename, _ = QFileDialog.getSaveFileName(
             self, "Sum recording", folder, "Scope sum capture (*.h5)",
             options=QFileDialog.Option.DontConfirmOverwrite,

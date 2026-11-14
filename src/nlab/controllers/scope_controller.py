@@ -24,6 +24,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QAction, QActionGroup, QCursor
 from PySide6.QtWidgets import QFileDialog, QMenu, QSlider, QSpinBox, QWidget
 
+from nlab import settings_keys
 from nlab.analysis.scope_distribution import AccumulatedAmplitudeHistogram, HistogramMode
 from nlab.hardware.digitizer.current_monitor import (
     ScopeCurrentAccumulator,
@@ -45,6 +46,7 @@ from nlab.hardware.digitizer.scope import (
     TriggerMode,
 )
 from nlab.ui.ui_scope_view import Ui_ScopeView
+from nlab.utils.recording_paths import measurement_folder, unique_recording_path
 from nlab.views.numeric_controls import bind_numeric_control, normalize_numeric_control
 from nlab.views.panel_status import PanelStatus
 from nlab.views.plot_viewbox import (
@@ -179,7 +181,6 @@ class ScopeController(QWidget):
         self._dma_worker: IIOScopeDmaWorker | None = None
         self._dma_thread: QThread | None = None
         self._dma_filepath: Path | None = None
-        self._dma_counter = 0
         self._dma_stopping = False
         self._dma_online_current = False
         self._dma_last_error: str | None = None
@@ -392,7 +393,7 @@ class ScopeController(QWidget):
     # ------------------------------------------------------------------
 
     def _settings_key(self, name: str) -> str:
-        return f"scope/ch{self._channel}/{name}"
+        return settings_keys.scope_channel(self._channel, name)
 
     def _restore_display_settings(self) -> None:
         s = QSettings()
@@ -2331,17 +2332,12 @@ class ScopeController(QWidget):
     # ------------------------------------------------------------------
 
     def _generate_filepath(self) -> Path:
-        folder = Path(str(QSettings().value("dma/save_folder", "measurements")))
-        folder.mkdir(parents=True, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        self._dma_counter += 1
-        name = f"scope_ch{self._channel}_{ts}_{self._dma_counter:03d}.bin"
-        filepath = folder / name
+        filepath = unique_recording_path(f"scope_ch{self._channel}", ".bin")
         log.info("Scope DMA: auto-generated filepath: %s", filepath)
         return filepath
 
     def _on_dma_file(self) -> None:
-        default_dir = str(QSettings().value("dma/save_folder", "measurements"))
+        default_dir = str(measurement_folder())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Scope DMA File",

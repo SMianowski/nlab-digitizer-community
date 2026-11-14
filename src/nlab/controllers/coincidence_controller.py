@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QRectF, QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -55,6 +55,7 @@ from nlab.hardware.digitizer.digitizer import Digitizer
 from nlab.hardware.digitizer.dma import IIOMcaDmaStreamer, McaEventBuffer
 from nlab.hardware.digitizer.iio_listmode import TIME_Q_PER_NS, VDPP_ZC_CALC_SCHEMA
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode
+from nlab.utils.recording_paths import measurement_folder
 from nlab.utils.settings_io import write_configuration
 from nlab.views.energy_axis import CalibratedEnergyAxis
 from nlab.views.image_display import transparent_sparse_bins
@@ -583,7 +584,7 @@ class CoincidenceController(QWidget):
         if snapshot is None:
             self.status.setText("No coincidence matrix is available to export.")
             return
-        folder = Path(str(QSettings().value("dma/save_folder", "measurements")))
+        folder = measurement_folder()
         stem = f"coincidence_{self._session_id or 'matrix'}_matrix"
         filename, selected_filter = QFileDialog.getSaveFileName(
             self,
@@ -808,9 +809,8 @@ class CoincidenceController(QWidget):
         self._clear_matrix("Analysis settings changed; collecting a new coincidence matrix.")
 
     def refresh_dma_output_settings(self) -> None:
-        settings = QSettings()
         mode = MCAController._output_mode()
-        folder = str(settings.value("dma/save_folder", "measurements"))
+        folder = str(measurement_folder())
         self.output_label.setText(
             f"{mode.value.upper()} • {folder}"
             if mode is not McaDmaOutputMode.ONLINE
@@ -821,7 +821,7 @@ class CoincidenceController(QWidget):
         if mode is McaDmaOutputMode.ONLINE:
             self._session_manifest = None
             return None, None
-        folder = Path(str(QSettings().value("dma/save_folder", "measurements")))
+        folder = measurement_folder()
         folder.mkdir(parents=True, exist_ok=True)
         assert self._session_id is not None
         stem = f"coincidence_{self._session_id}"
