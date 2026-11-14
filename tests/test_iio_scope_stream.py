@@ -168,6 +168,185 @@ def test_stream_rejects_unsupported_protocol_parameters(
         IiodScopeStream(*factory())
 
 
+class _BlockingIiod:
+    """Minimal real-socket iiod 0.25 peer whose READBUF never completes.
+
+    A real socket matters: after a local shutdown, the blocked receive fails
+    with an OS-specific error (WSAECONNABORTED on Windows, EOF on Linux).
+    ``reply`` replaces the blocking READBUF with a canned status line.
+    """
+
+    def __init__(self, reply: bytes | None = None) -> None:
+        self._server = socket.create_server(("127.0.0.1", 0))
+        self.port = self._server.getsockname()[1]
+        self._reply = reply
+        self.readbuf = threading.Event()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        connection, _ = self._server.accept()
+        with connection, connection.makefile("rb") as lines:
+            for line in lines:
+                command = line.strip()
+                if command == b"VERSION":
+                    connection.sendall(b"0.25.0\r\n")
+                elif command.startswith(b"READBUF"):
+                    if self._reply is not None:
+                        connection.sendall(self._reply)
+                    self.readbuf.set()
+                    # Block like a READBUF waiting for triggers until the
+                    # client goes away.
+                    while connection.recv(4096):
+                        pass
+                    return
+                else:
+                    connection.sendall(b"0\r\n")
+
+    def stream(self) -> IiodScopeStream:
+        return IiodScopeStream(
+            f"ip:127.0.0.1:{self.port}", "iio:device12", samples=8, batch_frames=2,
+        )
+
+    def close(self) -> None:
+        self._server.close()
+        self._thread.join(2)
+
+
+def _refill_in_thread(stream: IiodScopeStream) -> tuple[threading.Thread, list[BaseException]]:
+    errors: list[BaseException] = []
+
+    def body() -> None:
+        try:
+            stream.refill()
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=body)
+    thread.start()
+    return thread, errors
+
+
+def test_cancel_of_a_blocked_refill_reports_ecanceled_on_every_platform() -> None:
+    server = _BlockingIiod()
+    stream = server.stream()
+    try:
+        thread, errors = _refill_in_thread(stream)
+        assert server.readbuf.wait(2)
+
+        stream.cancel()
+        thread.join(2)
+
+        assert not thread.is_alive()
+        assert [getattr(exc, "errno", None) for exc in errors] == [errno.ECANCELED]
+        with pytest.raises(OSError) as again:
+            stream.refill()
+        assert again.value.errno == errno.ECANCELED
+        stream.close()
+        with pytest.raises(OSError) as closed:
+            stream.refill()
+        assert closed.value.errno == errno.EPIPE
+    finally:
+        stream.close()
+        server.close()
+
+
+def test_cancel_does_not_relabel_an_earlier_stream_fault() -> None:
+    server = _BlockingIiod(reply=b"-5\r\n")
+    stream = server.stream()
+    try:
+        with pytest.raises(OSError) as fault:
+            stream.refill()
+        assert fault.value.errno == errno.EIO
+
+        stream.cancel()
+
+        assert not stream.cancelled
+        with pytest.raises(OSError) as reused:
+            stream.refill()
+        assert reused.value.errno == errno.EPIPE
+    finally:
+        stream.close()
+        server.close()
+
+
+def _closing_backend(
+    monkeypatch: pytest.MonkeyPatch, stream: IiodScopeStream
+) -> IIODigitizerBackend:
+    import nlab.hardware.digitizer.backends.iio_backend as module
+
+    monkeypatch.setattr(module, "_DMA_CLOSE_DRAIN_SECONDS", 0.05)
+    backend = object.__new__(IIODigitizerBackend)
+    backend._ch = 0
+    backend._dma_buf = stream
+    backend._dma_buf_frame_samples = 8
+    backend._dma_capture_geometry = None
+    backend._dma_fault_latched = False
+    backend._dma_stop_requested = threading.Event()
+    backend._dma_scope = SimpleNamespace(attrs={})
+    monkeypatch.setattr(backend, "_dma_get_enable", lambda: False)
+    monkeypatch.setattr(backend, "_wait_for_dma_release", lambda: None)
+    return backend
+
+
+def test_frame_limited_close_drains_batched_stream_without_a_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = _BlockingIiod()
+    stream = server.stream()
+    backend = _closing_backend(monkeypatch, stream)
+    try:
+        backend._close_dma_buffer()  # drain's own cancel ends the blocked READBUF
+
+        assert not backend._dma_fault_latched
+        assert backend._dma_buf is None
+        assert stream.closed
+    finally:
+        stream.close()
+        server.close()
+
+
+def test_gui_stop_cancelling_during_close_drain_is_not_a_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = _BlockingIiod()
+    stream = server.stream()
+    backend = _closing_backend(monkeypatch, stream)
+    # request_dma_stop(): set the stop request, then cancel from the
+    # controller thread while the DMA thread is inside the close drain.
+    backend._dma_stop_requested.set()
+    canceller = threading.Thread(
+        target=lambda: (server.readbuf.wait(2), stream.cancel())
+    )
+    canceller.start()
+    try:
+        backend._close_dma_buffer()
+
+        assert not backend._dma_fault_latched
+        assert backend._dma_buf is None
+    finally:
+        canceller.join(2)
+        stream.close()
+        server.close()
+
+
+def test_uncancelled_batched_drain_failure_is_still_a_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = _BlockingIiod(reply=b"-5\r\n")
+    stream = server.stream()
+    backend = _closing_backend(monkeypatch, stream)
+    try:
+        with pytest.raises(OSError) as caught:
+            backend._close_dma_buffer()
+
+        assert caught.value.errno == errno.EIO
+        assert backend._dma_fault_latched
+    finally:
+        stream.close()
+        server.close()
+
+
 def _sum_packet(sequence, *, count=508, stopped=False, missed=0):
     # Native uint64 wrap plus two skipped windows before packet 1.
     first = (MASK64 - 50 + (sequence * 508 + (2 if sequence else 0)) * 7) & MASK64

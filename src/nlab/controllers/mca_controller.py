@@ -217,6 +217,9 @@ class MCAController(QWidget):
         self._render_timer.timeout.connect(self._render_pending_readback)
         self._threshold_drag_start: int | None = None
         self._pretrigger_line_drag: _DebugOffsetDragState | None = None
+        # Frame length the debug time axis was last built for; renders skip
+        # the axis/label/tooltip rebuild while it is unchanged.
+        self._debug_axis_frame_ns: int | None = None
 
         self._populate_combos()
         self._apply_parameter_specs()
@@ -971,6 +974,7 @@ class MCAController(QWidget):
     def _update_debug_time_axis(self, frame_ns: int | None = None) -> None:
         if frame_ns is None:
             frame_ns = self.ui.spinFrameSamples.value()
+        self._debug_axis_frame_ns = frame_ns
         displayed_samples = frame_ns // _DEBUG_SAMPLE_PERIOD_NS
         duration_ns = displayed_samples * _DEBUG_SAMPLE_PERIOD_NS
         self._debug_time_scale = time_axis_scale(duration_ns)
@@ -2564,13 +2568,24 @@ class MCAController(QWidget):
                     exc_info=True,
                 )
         if thread is not None:
-            if not thread.wait(3000):
-                log.warning("MCA DMA thread did not stop in time, terminating")
-                thread.terminate()
-                thread.wait()
-            thread.deleteLater()
-        self._dma_thread = None
-        self._dma_worker = None
+            if thread.wait(5000):
+                thread.deleteLater()
+                self._dma_thread = None
+                self._dma_worker = None
+            else:
+                # QThread.terminate() would bypass stream_events()'s
+                # drain/close and strand the native IIO buffer and its
+                # ownership gates (AGENTS.md DMA invariant 6). Leave the
+                # worker alive to finish its own cleanup, like
+                # ScopeController.stop_dma_sync(); _on_dma_finished()
+                # releases the wrappers once it exits.
+                log.error(
+                    "MCA ch%d: DMA thread did not stop within 5 seconds; "
+                    "leaving it alive rather than bypassing buffer cleanup",
+                    self._channel,
+                )
+        else:
+            self._dma_worker = None
 
         self._ensure_disarmed()
         self._finish_psd_capture()
@@ -2676,7 +2691,10 @@ class MCAController(QWidget):
         if self._pretrigger_line_drag is not None:
             return
         samples = self.ui.sliderFrameSamples.value()
-        self._update_debug_time_axis(samples)
+        if samples != self._debug_axis_frame_ns:
+            # Pretrigger and CC-guide changes have their own signal paths;
+            # only a new frame length requires rebuilding the axis here.
+            self._update_debug_time_axis(samples)
         if raw_debug1 is not None and len(raw_debug1) > 0:
             debug1 = raw_debug1[: samples // _DEBUG_SAMPLE_PERIOD_NS]
             t1 = (

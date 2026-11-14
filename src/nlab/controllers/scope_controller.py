@@ -122,7 +122,11 @@ class ScopeController(QWidget):
     Widget ranges and defaults are driven entirely by Scope.specs at runtime.
     """
 
-    _Y_SCALE_FACTOR = 20
+    # Fixed vertical raster resolution (~62 ADC codes per row over the 64k
+    # display range). It no longer scales with frame length: at 20 rows per
+    # column a 4096-sample frame needed an 84 MB float image (~100 ms per
+    # frame to rasterize and paint); this keeps it at a few ms.
+    _PERSISTENCE_ROWS = 1024
     _Y_MIN = -32_000
     _Y_MAX = 32_000
     # The scope captures raw ADC samples at 500 MSPS (2 ns/sample).  Its
@@ -662,12 +666,7 @@ class ScopeController(QWidget):
         self._send_defaults()
         self._load_hardware_state()
         self._set_dma_checkbox_without_write(False)
-        self._display_nx = self._frame_samples_from_ui() // 4
-        self._display_ny = self._display_nx * self._Y_SCALE_FACTOR
-        self._persistence_buffer = np.zeros(
-            (self._display_nx, self._display_ny),
-            dtype=np.float32,
-        )
+        self._reset_persistence_buffer(self._frame_samples_from_ui())
         self._persistence_img.setImage(
             self._persistence_buffer,
             autoLevels=False,
@@ -1737,7 +1736,9 @@ class ScopeController(QWidget):
             self._refresh_timer.setInterval(1000 // value)
 
     def _request_frame(self) -> None:
-        mode = self._scope.get_trigger_mode()
+        # Runs on every refresh tick (up to 60 Hz): use the mirrored mode
+        # rather than a blocking network read on the GUI thread.
+        mode = self._scope.cached_trigger_mode()
         if mode == TriggerMode.PERIODIC_SUM or (
             mode == TriggerMode.TIMED and not self._dma_online_current
         ):
@@ -1862,9 +1863,7 @@ class ScopeController(QWidget):
             self._update_waveform_drag_enabled()
         frame_samples = self._frame_samples_from_ui()
         self._scope.set_frame_samples(frame_samples)
-        self._display_nx = frame_samples // 4
-        self._display_ny = self._display_nx * self._Y_SCALE_FACTOR
-        self._persistence_buffer = np.zeros((self._display_nx, self._display_ny), dtype=np.float32)
+        self._reset_persistence_buffer(frame_samples)
         self._update_axis_ranges()
         if self._frame_exceeds_viewer_limit():
             self.status.setText(self._viewer_limit_message())
@@ -1930,8 +1929,17 @@ class ScopeController(QWidget):
             self._waveform_pending_status = None
             self._update_waveform_drag_enabled()
 
+    def _reset_persistence_buffer(self, frame_samples: int) -> None:
+        """One column per viewer point, fixed rows; see _PERSISTENCE_ROWS."""
+        self._display_nx = frame_samples // 4
+        self._display_ny = self._PERSISTENCE_ROWS
+        self._persistence_buffer = np.zeros(
+            (self._display_nx, self._display_ny), dtype=np.float32
+        )
+
     def _rasterize_frame(self, frame: np.ndarray) -> None:
-        self._persistence_buffer *= self.persistence
+        buffer = self._persistence_buffer
+        buffer *= self.persistence
         n_samples = min(len(frame), self._display_nx)
         if not n_samples:
             return
@@ -1944,12 +1952,15 @@ class ScopeController(QWidget):
             * (self._display_ny - 1)
         )
         y_pixels = np.clip(y_float, 0, self._display_ny - 1).astype(np.intp)
-        self._persistence_buffer[0, y_pixels[0]] = 1.0
-        # Match the raw trace's sample hold: transition at the *next* sample's
-        # column rather than interpolating amplitude between sample times.
-        for i in range(1, n_samples):
-            low, high = sorted((y_pixels[i - 1], y_pixels[i]))
-            self._persistence_buffer[i, low:high + 1] = 1.0
+        # Match the raw trace's sample hold: column i spans the transition
+        # from sample i-1 to sample i (column 0 is the first sample alone),
+        # rather than interpolating amplitude between sample times.
+        low = y_pixels.copy()
+        high = y_pixels.copy()
+        low[1:] = np.minimum(y_pixels[:-1], y_pixels[1:])
+        high[1:] = np.maximum(y_pixels[:-1], y_pixels[1:])
+        rows = np.arange(self._display_ny)
+        buffer[:n_samples][(rows >= low[:, None]) & (rows <= high[:, None])] = 1.0
 
     # ------------------------------------------------------------------
     # Graph setup
@@ -2216,10 +2227,9 @@ class ScopeController(QWidget):
         )
 
     def _setup_persistence_layer(self) -> None:
-        self._display_nx = self._frame_samples_from_ui() // 4
-        self._display_ny = self._display_nx * self._Y_SCALE_FACTOR
-        self._persistence_buffer = np.zeros((self._display_nx, self._display_ny), dtype=np.float32)
-        self._persistence_img = pg.ImageItem()
+        self._reset_persistence_buffer(self._frame_samples_from_ui())
+        # Downsample to screen pixels before colour-mapping long frames.
+        self._persistence_img = pg.ImageItem(autoDownsample=True)
         self._persistence_img.setImage(self._persistence_buffer, autoLevels=False, levels=(0, 1))
         self._persistence_img.setColorMap("viridis")
         self._plot_item.addItem(self._persistence_img)

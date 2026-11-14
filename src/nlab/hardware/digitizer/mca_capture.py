@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import queue
@@ -144,8 +145,18 @@ _CANONICAL_EVENT_DTYPE = np.dtype(
         ("zc_estimation", "<i2"),
     ]
 )
-_WRITER_QUEUE_BATCHES = 32
-_STRUCTURED_FLUSH_EVENTS = 8192
+# One batch is one 16 KiB list-mode frame (raw bytes or its event copy), so
+# this bounds writer memory to ~16 MiB per channel. The kernel ring holds only
+# eight frames; this queue is what absorbs file-system stalls (antivirus scans,
+# HDF5 chunk flushes, slow network shares) before backpressure reaches the
+# refill loop and the producer starts counting list dead time.
+_WRITER_QUEUE_BATCHES = 1024
+# HDF5 chunk = 8192 canonical events = 128 KiB, a good compression/IO unit.
+_HDF5_CHUNK_EVENTS = 8192
+# Flush (HDF5 resize + SWMR metadata flush, or one ROOT basket) per 64 Ki
+# events or once per second, whichever comes first. Bounded at ~1 MiB of
+# pending events; live SWMR readers still see data within a second.
+_STRUCTURED_FLUSH_EVENTS = 8 * _HDF5_CHUNK_EVENTS
 _STRUCTURED_FLUSH_SECONDS = 1.0
 _QUEUE_POLL_SECONDS = 0.05
 
@@ -182,14 +193,32 @@ class _CaptureSink(ABC):
 
 
 class _BinarySink(_CaptureSink):
+    """Write header + raw frames and hash exactly those bytes as they pass.
+
+    The file is opened with exclusive create, so the running digest equals
+    the file content after a successful close; finishing a multi-GB capture
+    no longer needs a second full read just to fill the sidecar checksum.
+    """
+
     def __init__(self, path: Path, header: bytes) -> None:
-        self._file = open(path, "xb", buffering=128 * 1024)
-        self._file.write(header)
+        self._file = open(path, "xb", buffering=1024 * 1024)
+        self._digest = hashlib.sha256()
+        self._write(header)
         self._file.flush()
+
+    def _write(self, data: bytes) -> None:
+        written = self._file.write(data)
+        if written != len(data):
+            raise OSError(f"short MCA capture write: wrote {written} of {len(data)} bytes")
+        self._digest.update(data)
+
+    @property
+    def sha256_hexdigest(self) -> str:
+        return self._digest.hexdigest()
 
     def append(self, raw: bytes, events: np.ndarray) -> None:
         del events
-        self._file.write(raw)
+        self._write(raw)
 
     def close(self, complete: bool) -> None:
         del complete
@@ -243,7 +272,7 @@ class _Hdf5Sink(_BufferedStructuredSink):
             "events",
             shape=(0,),
             maxshape=(None,),
-            chunks=(_STRUCTURED_FLUSH_EVENTS,),
+            chunks=(_HDF5_CHUNK_EVENTS,),
             dtype=_CANONICAL_EVENT_DTYPE,
             compression="gzip",
             compression_opts=1,
@@ -387,6 +416,7 @@ class McaCaptureWriter:
         self._ready = threading.Event()
         self._done = threading.Event()
         self._error: tuple[int | None, str] | None = None
+        self._binary_sha256: str | None = None
         self._thread = threading.Thread(
             target=self._run,
             name=f"mca-{mode.value}-writer",
@@ -434,6 +464,8 @@ class McaCaptureWriter:
             closing_sink = sink
             sink = None
             closing_sink.close(complete)
+            if isinstance(closing_sink, _BinarySink):
+                self._binary_sha256 = closing_sink.sha256_hexdigest
         except BaseException as exc:
             self._error = (getattr(exc, "errno", None), str(exc))
             log.error("MCA %s writer failed for %s: %s", self._mode.value, self._path, exc)
@@ -473,6 +505,11 @@ class McaCaptureWriter:
         finally:
             self._thread.join()
         self._raise_if_failed()
+
+    @property
+    def binary_sha256(self) -> str | None:
+        """SHA-256 of a cleanly closed binary capture, else None."""
+        return self._binary_sha256 if self._error is None else None
 
     def _raise_if_failed(self) -> None:
         if self._error is not None:

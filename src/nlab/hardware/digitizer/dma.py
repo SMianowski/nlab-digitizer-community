@@ -176,6 +176,16 @@ class ScopeDmaGeometry:
         )
 
 
+def _is_immutable_bytes_view(array: np.ndarray) -> bool:
+    """True when *array* is a read-only view whose memory is a ``bytes`` object."""
+    if array.flags.writeable:
+        return False
+    base: object = array
+    while isinstance(base, np.ndarray):
+        base = base.base
+    return isinstance(base, bytes)
+
+
 @dataclass(frozen=True)
 class ScopeDmaFrame:
     """A complete decoded Scope frame handed to live display consumers."""
@@ -189,6 +199,11 @@ class ScopeDmaFrame:
         samples = np.asarray(self.samples, dtype="<i2").reshape(-1)
         if samples.size != self.geometry.waveform_samples:
             raise ValueError("Scope DMA frame waveform does not match its geometry")
+        if _is_immutable_bytes_view(samples):
+            # The streamer passes a read-only view into the backend's
+            # immutable DMA record; sharing it is already safe.
+            object.__setattr__(self, "samples", samples)
+            return
         # Own one immutable byte string. Every bounded display consumer can
         # safely share the resulting read-only view after the next DMA refill.
         owned = bytes(samples.tobytes())
@@ -253,7 +268,8 @@ class ScopeFrameBuffer:
 class McaEventBuffer:
     """Bounded hand-off queue for live consumers of MCA DMA batches.
 
-    File recording remains synchronous in the streamer. If the GUI cannot
+    File recording has its own bounded writer queue (McaCaptureWriter) and
+    never depends on this display path. If the GUI cannot
     drain this queue quickly enough, only the oldest display batch is
     discarded; raw capture continuity is unaffected.
     """
@@ -380,14 +396,19 @@ def _write_iio_mca_metadata(
     client_record_schema: str,
     final_status: dict[str, object] | None = None,
     identity: dict[str, int | str] | None = None,
+    capture_sha256: str | None = None,
 ) -> Path:
-    """Write the auditable sidecar used by the reference capture workflow."""
+    """Write the auditable sidecar used by the reference capture workflow.
+
+    *capture_sha256* is the digest the writer computed over every byte it
+    wrote; without it (e.g. after a writer failure) the file is re-read.
+    """
     metadata_path = path.with_suffix(".json")
     continuity_valid = dma_fault == 0 and completed_frames == frame_count and deadtime_records == 0
     metadata = {
         "format": "nlab-iio-mca-ndma-v2",
         "capture": str(path.resolve()),
-        "capture_sha256": _sha256_file(path),
+        "capture_sha256": capture_sha256 or _sha256_file(path),
         "channel_index": channel,
         "started_utc": started_utc.isoformat(),
         "finished_utc": datetime.now(UTC).isoformat(),
@@ -533,7 +554,8 @@ class IIOScopeDmaStreamer:
             assert filepath is not None
             total_bytes = 0
             try:
-                with open(filepath, "wb") as f:
+                # 1 MiB buffering batches small frames into large writes.
+                with open(filepath, "wb", buffering=1024 * 1024) as f:
                     log.info("IIO scope DMA: recording to %s", filepath)
                     # This deliberate, one-time flush makes the file/header
                     # visible before on_ready can start hardware. Frame writes
@@ -874,18 +896,17 @@ class IIOMcaDmaStreamer:
             first = self._backend.start_mca_dma_capture(on_started=on_ready)
             if len(first):
                 consume(first)
-            while not stop_event.is_set():
-                if not self._backend.mca_dma_measurement_in_progress():
-                    break
+            # Hardware time-limit completion can occur before the GUI polling
+            # worker delivers its queued stop request. Check the producer
+            # after every complete frame so no refill is entered once it has
+            # stopped (it could block forever). One status read per frame:
+            # the post-frame check also gates the next iteration's refill.
+            in_progress = self._backend.mca_dma_measurement_in_progress()
+            while in_progress and not stop_event.is_set():
                 frame = self._backend.read_mca_dma_frame()
                 if len(frame):
                     consume(frame)
-                # Hardware time-limit completion can occur before the GUI
-                # polling worker delivers its queued stop request. Once the
-                # final complete frame has arrived, avoid entering another
-                # refill that could block forever with the producer stopped.
-                if not self._backend.mca_dma_measurement_in_progress():
-                    break
+                in_progress = self._backend.mca_dma_measurement_in_progress()
         except BaseException as exc:
             retain_failure("Capture", exc)
         # Healthy STOP preserves accepted tail frames. Fault cleanup must not
@@ -990,6 +1011,7 @@ class IIOMcaDmaStreamer:
                     dma_error_count=dma_error_count, completed_frames=completed_frames,
                     deadtime_records=deadtime_records, client_record_schema=capture_schema,
                     final_status=status, identity=self.transport_identity(),
+                    capture_sha256=writer.binary_sha256 if writer is not None else None,
                 )
             except BaseException as exc:
                 retain_failure("Metadata", exc)

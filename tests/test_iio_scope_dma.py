@@ -224,6 +224,33 @@ def test_streamer_publishes_dynamic_frames_without_creating_a_file() -> None:
     assert backend.closed == 1
 
 
+def test_published_frame_shares_the_immutable_dma_record() -> None:
+    frame_buffer = ScopeFrameBuffer()
+
+    IIOScopeDmaStreamer(_OneDynamicFrameScopeBackend(), channel=0).stream_to_file(
+        None, threading.Event(), n_frames=1, frame_buffer=frame_buffer,
+    )
+
+    (frame,), _ = frame_buffer.drain()
+    base: object = frame.samples
+    while isinstance(base, np.ndarray):
+        base = base.base
+    assert isinstance(base, bytes)
+    assert not frame.samples.flags.writeable
+
+
+def test_frame_from_mutable_samples_owns_a_private_copy() -> None:
+    source = np.arange(4, dtype="<i2")
+    frame = dma_module.ScopeDmaFrame(
+        timestamp=1, received_ns=2, samples=source, geometry=ScopeDmaGeometry.legacy(8),
+    )
+
+    source[0] = 99
+
+    assert frame.samples[0] == 0
+    assert not frame.samples.flags.writeable
+
+
 def test_streamer_accumulates_current_before_replaceable_display() -> None:
     backend = _OneDynamicFrameScopeBackend()
     streamer = IIOScopeDmaStreamer(backend, channel=0)
@@ -323,8 +350,8 @@ def test_streamer_refills_while_separate_writer_is_blocked(
     real_open = open
 
     class DelayedFile:
-        def __init__(self, path: Path, mode: str) -> None:
-            self._file = real_open(path, mode)
+        def __init__(self, path: Path, mode: str, buffering: int) -> None:
+            self._file = real_open(path, mode, buffering=buffering)
 
         def __enter__(self) -> DelayedFile:
             return self
@@ -344,10 +371,12 @@ def test_streamer_refills_while_separate_writer_is_blocked(
             flush_calls.append(None)
             self._file.flush()
 
-    def delayed_open(path: Path, mode: str) -> DelayedFile:
+    def delayed_open(path: Path, mode: str, buffering: int = -1) -> DelayedFile:
         assert path == output
         assert mode == "wb"
-        return DelayedFile(path, mode)
+        # Large buffering turns per-frame writes into few large syscalls.
+        assert buffering >= 1024 * 1024
+        return DelayedFile(path, mode, buffering)
 
     monkeypatch.setattr(dma_module, "open", delayed_open, raising=False)
     result: list[int] = []

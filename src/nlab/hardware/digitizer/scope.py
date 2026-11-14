@@ -112,18 +112,37 @@ class ScopeSettingEntry(TypedDict):
 # ---------------------------------------------------------------------------
 
 
+class _TriggerModeMirror:
+    """Last trigger mode written or read by any client of one Scope channel.
+
+    Shared by a Scope and the isolated clients it creates (Auto Setup, the
+    viewer), so a mode change on any of them is visible to the others without
+    a network read. A single attribute assignment is atomic under the GIL.
+    """
+
+    __slots__ = ("mode",)
+
+    def __init__(self) -> None:
+        self.mode: TriggerMode | None = None
+
+
 class Scope:
     """High-level scope interface. All validation lives here; the backend is
     a thin hardware translator with no business logic."""
 
     specs: dict[ScopeParam, ParameterSpec] = PARAMETER_SPECS
 
-    def __init__(self, backend: ScopeBackend) -> None:
+    def __init__(
+        self, backend: ScopeBackend, *, _trigger_mirror: _TriggerModeMirror | None = None
+    ) -> None:
         self._b = backend
+        self._trigger_mirror = _trigger_mirror or _TriggerModeMirror()
 
     def create_isolated_client(self) -> Scope:
         """Create a scope client whose transport belongs to a worker thread."""
-        return type(self)(self._b.create_isolated_scope_backend())
+        return type(self)(
+            self._b.create_isolated_scope_backend(), _trigger_mirror=self._trigger_mirror
+        )
 
     def close(self) -> None:
         """Close this client's backend connection."""
@@ -170,12 +189,30 @@ class Scope:
         return tuple(TriggerMode(mode) for mode in modes)
 
     def get_trigger_mode(self) -> TriggerMode:
-        return TriggerMode(self._b.get_edge())
+        """Read the hardware trigger mode (one IIO round trip)."""
+        mode = TriggerMode(self._b.get_edge())
+        self._trigger_mirror.mode = mode
+        return mode
+
+    def cached_trigger_mode(self) -> TriggerMode:
+        """Last mode this channel's clients wrote or read; reads once if unknown.
+
+        For high-rate GUI ticks. Every write goes through set_trigger_mode()
+        on this Scope or one of its isolated clients, so the mirror cannot
+        miss an nlab-originated change.
+        """
+        mode = self._trigger_mirror.mode
+        return mode if mode is not None else self.get_trigger_mode()
 
     def set_trigger_mode(self, val: TriggerMode) -> None:
         if val not in self.supported_trigger_modes():
             raise ValueError("Trigger mode is not supported by this Scope IP")
-        self._b.set_edge(int(val))
+        try:
+            self._b.set_edge(int(val))
+        except BaseException:
+            self._trigger_mirror.mode = None  # outcome unknown: re-read next time
+            raise
+        self._trigger_mirror.mode = TriggerMode(val)
 
     def frame_period_cycles_supported(self) -> bool:
         """Whether this backend exposes the v121 periodic-gap register."""

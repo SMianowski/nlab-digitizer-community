@@ -87,6 +87,37 @@ def test_current_dma_steps_and_iir_trend_restore_independently(qtbot: QtBot) -> 
     assert controller._curve.opts["connect"] == "auto"
 
 
+def _reference_rasterize(buffer: np.ndarray, frame: np.ndarray, decay: float) -> None:
+    """The original per-column loop, kept as the behavioural reference."""
+    nx, ny = buffer.shape
+    buffer *= decay
+    n = min(len(frame), nx)
+    if not n:
+        return
+    y = (frame[:n].astype(np.float32) - -32_000) / 64_000 * (ny - 1)
+    y_pixels = np.clip(y, 0, ny - 1).astype(np.intp)
+    buffer[0, y_pixels[0]] = 1.0
+    for i in range(1, n):
+        low, high = sorted((y_pixels[i - 1], y_pixels[i]))
+        buffer[i, low:high + 1] = 1.0
+
+
+def test_vectorized_persistence_matches_reference_loop() -> None:
+    rng = np.random.default_rng(1234)
+    nx, ny = 64, 128
+    state = SimpleNamespace(
+        persistence=0.75, _display_nx=nx, _display_ny=ny, _Y_MIN=-32_000, _Y_MAX=32_000,
+        _persistence_buffer=np.zeros((nx, ny), dtype=np.float32),
+    )
+    expected = np.zeros((nx, ny), dtype=np.float32)
+    for length in (nx, nx // 2, 1, nx + 9, nx):
+        # Includes full-scale clipping, partial (prefix) frames and overlong frames.
+        frame = rng.integers(-40_000, 40_000, size=length).astype(np.int32)
+        ScopeController._rasterize_frame(cast(ScopeController, state), frame)
+        _reference_rasterize(expected, frame, 0.75)
+        np.testing.assert_array_equal(state._persistence_buffer, expected)
+
+
 def test_persistence_uses_sample_holds_and_next_sample_transitions() -> None:
     state = SimpleNamespace(
         persistence=0.5, _display_nx=6, _display_ny=5, _Y_MIN=0, _Y_MAX=4,

@@ -54,6 +54,10 @@ class IiodScopeStream:
         self.remaining = 0
         self.first_chunk = False
         self.failed = False
+        # Set by cancel() on a healthy stream. Socket errors after a deliberate
+        # cancel are platform-specific (Windows WSAECONNABORTED 10053, Linux
+        # EOF -> EPROTO), so refill() reports them uniformly as ECANCELED.
+        self.cancelled = False
         # Only an explicit Linux -ETIMEDOUT READBUF reply proves the server
         # reached an empty tail. A local socket timeout can truncate a packet.
         self.server_timed_out = False
@@ -102,8 +106,10 @@ class IiodScopeStream:
 
     def refill(self) -> int:
         """Receive one complete frame, retaining the rest of its batch."""
-        if self.failed or self.closed:
+        if self.closed or (self.failed and not self.cancelled):
             raise OSError(errno.EPIPE, "stream is closed or faulted; close and rearm")
+        if self.cancelled:
+            raise OSError(errno.ECANCELED, "iiod stream was cancelled")
         self.payload = None
         try:
             if not self.remaining:
@@ -135,6 +141,10 @@ class IiodScopeStream:
             return size
         except BaseException:
             self.failed = True
+            if self.cancelled:
+                # The socket was shut down on purpose; the OS error that
+                # interrupted this read carries no information.
+                raise OSError(errno.ECANCELED, "iiod stream was cancelled") from None
             raise
 
     def read(self) -> bytes:
@@ -144,7 +154,14 @@ class IiodScopeStream:
         return self.payload
 
     def cancel(self) -> None:
-        """Interrupt a blocked refill; the stream cannot be reused."""
+        """Interrupt a blocked refill; the stream cannot be reused.
+
+        A refill interrupted by (or attempted after) a cancel of a healthy
+        stream raises ECANCELED. A stream that had already faulted keeps
+        reporting its fault, and a closed stream reports EPIPE.
+        """
+        if not self.failed:
+            self.cancelled = True
         self.failed = True
         try:
             self.sock.shutdown(socket.SHUT_RDWR)

@@ -53,6 +53,7 @@ class PSDController(QWidget):
         self._session_replay_timer_was_active = False
         self._session_replay_reconfigure: Callable[[PsdAccumulator], None] | None = None
         self._session_replay_render_pending = False
+        self._live_render_pending = False
 
         self.ui = Ui_PSDView()
         self.ui.setupUi(self)
@@ -273,12 +274,21 @@ class PSDController(QWidget):
             self._update_status()
             return
         try:
-            for events in batches:
-                self._accumulator.add_events(events)
+            # Histogram counts are additive: one 2-D histogram over every
+            # pending event replaces a full dense-matrix add per 1024-event
+            # batch, which dominated at high rates or large bin counts.
+            events = batches[0] if len(batches) == 1 else np.concatenate(batches)
+            self._accumulator.add_events(events)
         except (TypeError, ValueError):
             log.exception("PSD ch%d: failed to analyze a DMA event batch", self._channel)
             self._capture_note = "PSD analysis error; raw DMA recording continues."
-        self._render()
+        if self.isVisible():
+            self._render()
+        else:
+            # Accumulation never pauses; image/projection rendering waits
+            # until the view is shown (see showEvent).
+            self._live_render_pending = True
+            self._update_status()
 
     def _on_analysis_settings_changed(self) -> None:
         ratio_range = (self.ui.spinRatioMin.value(), self.ui.spinRatioMax.value())
@@ -399,9 +409,10 @@ class PSDController(QWidget):
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt override
         super().showEvent(event)
-        if self._session_replay_render_pending:
+        if self._session_replay_render_pending or self._live_render_pending:
             self._render()
             self._session_replay_render_pending = False
+            self._live_render_pending = False
 
     def end_session_replay(self) -> None:
         """Remove replay products and restore the pre-replay analysis controls."""

@@ -236,8 +236,44 @@ def test_hv_temperature_compensation_is_applied_during_poll(
 
     # Digital temperature is 31.25 C, so the target is 101.125 V. The DAC
     # resolution is 0.02 V/code and therefore rounds to 101.12 V.
+    assert backend._devices.hv_output.attrs["raw"].value == "5056"
     assert backend.get_hv_compens_output() == pytest.approx(101.12)
-    assert backend._monitor_devices.hv_output.attrs["raw"].value == "5056"
+
+    # A temperature drift seen by the polling connection changes the code,
+    # so the poll writes it: 41.25 C -> 102.125 V -> code 5106 (102.12 V).
+    monitor = backend._monitor_devices
+    assert monitor.digital_temp_input is not None
+    monitor.digital_temp_input.attrs["raw"].value = "5280"
+    assert backend.get_hv_compens_output() == pytest.approx(102.12)
+    assert monitor.hv_output.attrs["raw"].value == "5106"
+
+
+def test_poll_does_not_rewrite_an_unchanged_hv_dac_code(backend: IIOIDSBackend) -> None:
+    backend.set_hv_voltage(100.0)  # explicit setpoint: always written
+    monitor_dac = backend._monitor_devices.hv_output.attrs["raw"]
+    monitor_dac.value = "sentinel"
+
+    # Mode 0 has a constant target, so periodic refreshes must not keep
+    # rewriting the HV DAC over the network.
+    assert backend.get_hv_compens_output() == pytest.approx(100.0)
+    assert backend.get_hv_compens_output() == pytest.approx(100.0)
+    assert monitor_dac.value == "sentinel"
+
+    backend.set_hv_voltage(100.0)  # an explicit write is never skipped
+    assert backend._devices.hv_output.attrs["raw"].value == "5000"
+
+
+def test_driver_scales_are_read_once_per_context_but_raw_stays_live(
+    backend: IIOIDSBackend,
+) -> None:
+    monitor = backend._monitor_devices
+    first = backend.get_hv_adc_voltage()
+    # A scale is a driver constant; a later change would need a reconnect.
+    monitor.adc.attrs["scale"].value = "999"
+    raw = int(monitor.hv_feedback.attrs["raw"].value)
+    monitor.hv_feedback.attrs["raw"].value = str(raw * 2)
+
+    assert backend.get_hv_adc_voltage() == pytest.approx(first * 2)
 
 
 def test_removed_sipm_is_unavailable(backend: IIOIDSBackend) -> None:

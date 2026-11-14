@@ -23,6 +23,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accessors' physics names (`get_trapez_R`, `get_crrc2_Cdelay`, ...) are kept as
   public API. PSU control wiring now uses one logged write helper, with tests for
   construction defaults, every IDS control write, and the replay interlock.
+- Scope persistence uses a fixed 1024-row raster (about 62 ADC codes per row)
+  instead of 20 rows per waveform column, with vectorized rasterization and
+  screen-resolution downsampling. A 4096-sample frame drops from an 84 MB image
+  and ~100 ms per frame to ~4 MB and ~5 ms; the maximum frame from 335 MB to 8 MB.
+- GUI responsiveness: the Scope refresh tick no longer reads the trigger mode over
+  the network (a mirror shared by the channel's Scope clients tracks writes); PSD
+  bins all pending DMA events with one 2-D histogram per tick and defers image
+  rendering while hidden; the MCA debug plot rebuilds its time axis only when the
+  frame length changes.
+- Fewer IIO round trips: driver-fixed `scale` attributes (MCA dead time,
+  temperature correction, IDS ADC/DAC/TMP117, XADC rails) and the Scope viewer
+  capacity are read once per connection; MCA list-mode reads the producer status
+  once per frame instead of twice.
+- MCA list-mode recording: the writer queue holds 1024 frames (~16 MiB) instead
+  of 32 to absorb storage stalls before the 8-block kernel ring backs up; binary
+  captures hash bytes as they are written, so Stop no longer re-reads the file for
+  the sidecar SHA-256; HDF5/ROOT flush every 64 Ki events or 1 s (HDF5 chunks stay
+  8192 events); MCA DMA progress is coalesced to 10 Hz like Scope. Scope and MCA
+  binary files use 1 MiB write buffering, and live Scope frames share the
+  immutable DMA record instead of copying it.
+
+### Fixed
+
+- Stopping a batched-iiod Scope DMA capture no longer reports a DMA fault
+  ("Stopped (recovered from DMA fault)", `Drain: [WinError 10053]`). Cancelling the
+  dedicated READBUF socket surfaces a platform-specific error (WSAECONNABORTED or
+  WSAESHUTDOWN on Windows, EOF on Linux) that the close-drain treated as a real
+  failure, and a GUI Stop could cancel it from the controller thread mid-drain.
+  `IiodScopeStream` now reports a deliberate cancel as ECANCELED and the drain
+  recognises it; real drain errors (e.g. EIO) still latch. Validated live (v124,
+  ch0) for frame-limited and GUI-style stops: complete frames, no fault, gates
+  released, and back-to-back captures without recovery acknowledgement.
+- MCA DMA blocking stop (application exit or reconnect) no longer calls
+  `QThread.terminate()` after 3 s, which could bypass the list-mode drain/close
+  and strand the native IIO buffer. Like Scope, it waits 5 s and otherwise leaves
+  the reader alive to finish its own cleanup.
+- The PSU monitor no longer rewrites the HV DAC every poll when the compensated
+  code is unchanged (always the case in compensation mode 0). Explicit setpoint,
+  compensation changes and safe shutdown still always write.
 
 ## [0.8.5] — 2026-11-13
 

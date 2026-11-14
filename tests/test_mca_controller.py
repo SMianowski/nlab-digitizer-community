@@ -145,6 +145,46 @@ def test_dma_finish_retries_without_releasing_live_thread(
     assert retries == [(100, callback)]
 
 
+def _dma_sync_controller(thread: _ThreadProbe) -> SimpleNamespace:
+    return _controller(
+        _channel=0,
+        _dma_worker=Mock(),
+        _dma_thread=thread,
+        _mca=Mock(),
+        _ensure_disarmed=Mock(),
+        _finish_psd_capture=Mock(),
+        _end_coincidence_capture=Mock(),
+    )
+
+
+def test_blocking_dma_stop_releases_a_finished_thread() -> None:
+    events: list[str] = []
+    controller = _dma_sync_controller(_ThreadProbe(events))
+    worker = controller._dma_worker
+
+    MCAController.stop_dma_sync(controller)  # type: ignore[arg-type]
+
+    worker.stop.assert_called_once_with()
+    assert events == ["wait:5000", "delete"]
+    assert controller._dma_thread is None
+    assert controller._dma_worker is None
+    controller._ensure_disarmed.assert_called_once_with()
+
+
+def test_blocking_dma_stop_never_terminates_a_stuck_reader() -> None:
+    # _ThreadProbe has no terminate(): calling it would raise AttributeError.
+    events: list[str] = []
+    thread = _ThreadProbe(events, exits=False)
+    controller = _dma_sync_controller(thread)
+
+    MCAController.stop_dma_sync(controller)  # type: ignore[arg-type]
+
+    assert events == ["wait:5000"]
+    assert controller._dma_thread is thread
+    assert controller._dma_worker is not None
+    controller._ensure_disarmed.assert_called_once_with()
+
+
 def test_polling_finish_waits_before_releasing_thread_wrappers() -> None:
     events: list[str] = []
     thread = _ThreadProbe(events)
@@ -730,6 +770,32 @@ def test_pending_readback_renders_only_latest_snapshot() -> None:
         call.statistics(latest),
         call.histogram(latest.histogram),
     ]
+
+
+def test_debug_render_rebuilds_time_axis_only_when_frame_length_changes() -> None:
+    frame_ns = [2048]
+    controller = SimpleNamespace(
+        _pretrigger_line_drag=None,
+        _debug_axis_frame_ns=None,
+        _debug_time_scale=SimpleNamespace(ns_per_unit=1000.0),
+        _debug1_curve=Mock(),
+        _debug2_curve=Mock(),
+        ui=SimpleNamespace(sliderFrameSamples=SimpleNamespace(value=lambda: frame_ns[0])),
+    )
+
+    def rebuild(value: int) -> None:
+        controller._debug_axis_frame_ns = value
+
+    controller._update_debug_time_axis = Mock(side_effect=rebuild)
+    raw = np.arange(300, dtype=np.int16)
+
+    for _ in range(3):
+        MCAController._update_debug_plot(controller, raw, raw)  # type: ignore[arg-type]
+    frame_ns[0] = 1024
+    MCAController._update_debug_plot(controller, raw, raw)  # type: ignore[arg-type]
+
+    assert controller._update_debug_time_axis.call_args_list == [call(2048), call(1024)]
+    assert controller._debug1_curve.setData.call_count == 4
 
 
 def test_mca_debug_viewer_scales_time_axis_and_explains_sample_period() -> None:

@@ -34,6 +34,41 @@ def test_controller_drains_dma_batches_into_live_matrix(qtbot: QtBot) -> None:
     controller.stop_processing()
 
 
+def test_hidden_psd_accumulates_all_batches_and_renders_when_shown(qtbot: QtBot) -> None:
+    event_buffer = McaEventBuffer()
+    controller = PSDController(event_buffer, channel=0)
+    qtbot.addWidget(controller)
+    controller.begin_capture(True)
+    rng = np.random.default_rng(7)
+    batches = []
+    for _ in range(5):
+        events = np.zeros(1024, dtype=_LM_EVENT_DTYPE)
+        events["trapezoid_energy"] = rng.integers(0, 60_000, 1024)
+        events["charge_energy"] = rng.integers(0, 30_000, 1024)
+        batches.append(events)
+        event_buffer.append(events)
+    reference = PSDController(McaEventBuffer(), channel=0)
+    qtbot.addWidget(reference)
+    for events in batches:
+        reference._accumulator.add_events(events)
+    image_updates = Mock()
+    controller._psd_image.setImage = image_updates  # type: ignore[method-assign]
+
+    assert not controller.isVisible()
+    controller.process_pending_events()
+
+    # One batched histogram equals the per-batch sum, and stats stay live.
+    np.testing.assert_array_equal(controller._accumulator.matrix, reference._accumulator.matrix)
+    assert controller._accumulator.statistics == reference._accumulator.statistics
+    assert "Accepted:" in controller.status.text()
+    image_updates.assert_not_called()
+
+    controller.show()
+    qtbot.waitExposed(controller)
+    image_updates.assert_called_once()
+    controller.stop_processing()
+
+
 def test_live_psd_matrix_makes_zero_and_one_count_bins_transparent(
     qtbot: QtBot,
 ) -> None:

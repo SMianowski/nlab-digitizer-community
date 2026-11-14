@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import io
 import json
 import logging
@@ -36,6 +37,7 @@ from nlab.hardware.digitizer.dma import (
 )
 from nlab.hardware.digitizer.iio_listmode import cfd_interpolation_samples
 from nlab.utils.dma_converter import convert_listmode, read_file_header
+from nlab.workers.dma_workers import IIOMcaDmaWorker
 
 
 def test_iio_event_bytes_match_zero_crossing_hls_output_layout() -> None:
@@ -224,6 +226,19 @@ def test_mca_dma_cancel_explains_native_ebadf_once(caplog: Any) -> None:
     assert len(matching) == 1
     assert "expected EBADF" in matching[0]
     assert "test stop" in matching[0]
+
+
+def test_dead_time_scale_is_read_once_and_raw_every_call() -> None:
+    reads: list[str] = []
+    values = {"dead_time_raw": "10", "dead_time_scale": "0.5"}
+    backend = object.__new__(IIODigitizerBackend)
+    backend._mca_pp_attr_get = lambda name: reads.append(name) or values[name]  # type: ignore[method-assign]
+
+    assert backend.get_pulse_deadtime_ms() == 5.0
+    values["dead_time_raw"] = "20"
+    assert backend.get_pulse_deadtime_ms() == 10.0
+
+    assert reads == ["dead_time_raw", "dead_time_scale", "dead_time_raw"]
 
 
 def test_binary_attribute_read_reserves_libiio_terminator(monkeypatch: Any) -> None:
@@ -451,6 +466,42 @@ def test_iio_streamer_writes_versioned_frames_and_preserves_tail(tmp_path: Path)
         "list_deadtime_raw": 0,
         "continuity_valid": True,
     }
+
+
+def test_binary_sidecar_checksum_comes_from_writer_not_a_reread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def reread_forbidden(_path: Path) -> str:
+        raise AssertionError("a clean capture must not be re-read for its checksum")
+
+    monkeypatch.setattr("nlab.hardware.digitizer.dma._sha256_file", reread_forbidden)
+    stop_event = threading.Event()
+    output = tmp_path / "hashed.bin"
+
+    IIOMcaDmaStreamer(_FakeBackend(stop_event), channel=0).stream_events(stop_event, output)
+
+    metadata = json.loads(output.with_suffix(".json").read_text(encoding="utf-8"))
+    assert metadata["capture_sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
+
+
+def test_mca_worker_coalesces_frame_progress() -> None:
+    def stream_events(*, on_ready, on_progress, **_kwargs):
+        on_ready()
+        for frame in range(1, 1001):
+            on_progress(frame * 1024)
+        return 1000 * 1024
+
+    streamer = SimpleNamespace(stream_events=stream_events, last_capture_diagnostics=None)
+    worker = IIOMcaDmaWorker(streamer)
+    updates: list[int] = []
+    summaries: list[Any] = []
+    worker.progress.connect(updates.append)
+    worker.summary.connect(summaries.append)
+
+    worker.run()
+
+    assert updates == [1024, 1000 * 1024]
+    assert summaries[0].records == 1000 * 1024
 
 
 def test_iio_streamer_forwards_initial_and_drained_frames_to_bounded_buffer() -> None:

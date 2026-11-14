@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,7 +32,38 @@ if TYPE_CHECKING:
     from nlab.hardware.digitizer.current_monitor import ScopeCurrentAccumulator
 
 log = logging.getLogger(__name__)
-_SCOPE_PROGRESS_INTERVAL_S = 0.1
+# DMA callbacks fire once per frame (hundreds to thousands per second); the GUI
+# only needs a status-text refresh at a human-readable rate.
+_PROGRESS_INTERVAL_S = 0.1
+
+
+class _ProgressThrottle:
+    """Forward at most one progress value per interval, then the final value.
+
+    Called from the DMA/writer thread; each forwarded value becomes one queued
+    cross-thread signal, so throttling here keeps the GUI event queue short.
+    """
+
+    def __init__(self, emit: Callable[[int], None], interval_s: float = _PROGRESS_INTERVAL_S):
+        self._emit = emit
+        self._interval_s = interval_s
+        self.latest: int | None = None
+        self._reported: int | None = None
+        self._reported_at = float("-inf")
+
+    def __call__(self, value: int) -> None:
+        self.latest = value
+        now = time.monotonic()
+        if now - self._reported_at >= self._interval_s:
+            self._emit(value)
+            self._reported = value
+            self._reported_at = now
+
+    def flush(self) -> None:
+        """Emit the last value if the throttle withheld it."""
+        if self.latest is not None and self.latest != self._reported:
+            self._emit(self.latest)
+            self._reported = self.latest
 
 
 def _finish_mca_run(
@@ -102,18 +134,7 @@ class IIOScopeDmaWorker(BaseWorker):
 
     def run(self) -> None:
         log.info("IIOScopeDmaWorker: starting, file=%s", self._filepath)
-        last_progress: int | None = None
-        last_reported: int | None = None
-        last_report_at = float("-inf")
-
-        def report_progress(value: int) -> None:
-            nonlocal last_progress, last_reported, last_report_at
-            last_progress = value
-            now = time.monotonic()
-            if now - last_report_at >= _SCOPE_PROGRESS_INTERVAL_S:
-                self.progress.emit(value)
-                last_reported = value
-                last_report_at = now
+        report_progress = _ProgressThrottle(self.progress.emit)
 
         try:
             total = self._streamer.stream_to_file(
@@ -130,8 +151,7 @@ class IIOScopeDmaWorker(BaseWorker):
             log.exception("IIOScopeDmaWorker: streaming failed")
             self.error.emit("IIO scope DMA streaming failed")
         finally:
-            if last_progress is not None and last_progress != last_reported:
-                self.progress.emit(last_progress)
+            report_progress.flush()
             self.finished.emit()
 
     def stop(self) -> None:
@@ -180,11 +200,7 @@ class IIOMcaDmaWorker(BaseWorker):
         started_monotonic = time.monotonic()
         records = 0
         error: str | None = None
-
-        def report_progress(count: int) -> None:
-            nonlocal records
-            records = count
-            self.progress.emit(count)
+        report_progress = _ProgressThrottle(self.progress.emit)
 
         try:
             total = self._streamer.stream_events(
@@ -200,12 +216,14 @@ class IIOMcaDmaWorker(BaseWorker):
             records = total
             log.info("IIOMcaDmaWorker: completed, %d records received", total)
         except Exception as exc:
+            records = report_progress.latest or 0
             error = str(exc)
             log.exception("IIOMcaDmaWorker: streaming failed")
             if is_fatal_transport_error(exc):
                 self.connection_lost.emit(error)
             self.error.emit(f"IIO MCA DMA streaming failed: {error}")
         finally:
+            report_progress.flush()
             self.summary.emit(
                 _finish_mca_run(
                     channel=self._channel,

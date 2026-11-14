@@ -363,6 +363,8 @@ class IIODigitizerBackend(DigitizerBackend):
                 f"{uri}, channel {channel} out of range"
             )
         self._scope = scopes[channel]
+        # Fixed viewer-memory capacity of this Scope IP; read once on first use.
+        self._viewer_mem_entries: int | None = None
 
         chan = self._scope.find_channel("voltage0")
         if chan is None:
@@ -738,11 +740,21 @@ class IIODigitizerBackend(DigitizerBackend):
                 try:
                     self._refill_scope_buffer(buf)
                 except Exception as exc:
-                    # cancel() is expected to interrupt the final
-                    # blocking refill -- only an earlier failure is a
-                    # real error.
-                    if not (stop.is_set() and getattr(exc, "errno", None)
-                            in _LM_EXPECTED_CANCEL_ERRNOS):
+                    # cancel() is expected to interrupt the final blocking
+                    # refill -- either this drain's own cancel after the
+                    # window, or request_dma_stop() cancelling from the
+                    # controller thread while this drain is running. Only an
+                    # uncancelled failure is a real error.
+                    cancelled = stop.is_set() or self._dma_stop_requested.is_set()
+                    # Native libiio reports cancellation as EBADF/ECANCELED.
+                    # The batched socket's errors are platform-specific, so
+                    # ask the stream whether it was deliberately cancelled.
+                    expected = (
+                        getattr(buf, "cancelled", False)
+                        if isinstance(buf, IiodScopeStream)
+                        else getattr(exc, "errno", None) in _LM_EXPECTED_CANCEL_ERRNOS
+                    )
+                    if not (cancelled and expected):
                         errors.append((getattr(exc, "errno", None) or errno.EIO, str(exc)))
                     return
                 drained.append(None)
@@ -1904,7 +1916,16 @@ class IIODigitizerBackend(DigitizerBackend):
         return int(self._attr_get("ip_version"))
 
     def get_mem_frame_size(self) -> int:
-        return int(self._attr_get("viewer_mem_entries"))
+        """Viewer-memory capacity in entries (2048 on current Scope IP).
+
+        A read-only hardware capacity, so it is read once per context instead
+        of on every viewer frame (one network round trip each).
+        """
+        entries = getattr(self, "_viewer_mem_entries", None)
+        if entries is None:
+            entries = int(self._attr_get("viewer_mem_entries"))
+            self._viewer_mem_entries = entries
+        return entries
 
     def get_enable(self) -> bool:
         return bool(int(self._attr_get("enable")))
@@ -3197,11 +3218,16 @@ class IIODigitizerBackend(DigitizerBackend):
 
         ``user-api.md`` and ``vdpp-pulse-processor.c`` define
         ``dead_time_scale`` as milliseconds per ``dead_time_raw`` count.
-        Reading the scale keeps the GUI correct if a later compatible image
-        changes that constant.
+        Applying the advertised scale keeps the GUI correct if a later
+        compatible image changes that constant. It is fixed while a context
+        is open (a driver reload requires reconnecting, which rediscovers
+        attributes), so it is read once instead of on every poll tick.
         """
         raw = int(self._mca_pp_attr_get("dead_time_raw"))
-        scale = float(self._mca_pp_attr_get("dead_time_scale"))
+        scale = getattr(self, "_dead_time_scale", None)
+        if scale is None:
+            scale = float(self._mca_pp_attr_get("dead_time_scale"))
+            self._dead_time_scale = scale
         return raw * scale
 
     def get_events_lost(self) -> int:
@@ -3342,7 +3368,11 @@ class IIODigitizerBackend(DigitizerBackend):
                 f"no {_INPUT_FILTER_DEVICE_NAME} device bound for MCA "
                 "temperature correction"
             )
-        scale = float(device.attrs["temperature_coefficient_scale"].value)
+        # The advertised scale is fixed for this worker context; read once.
+        scale = getattr(self, "_temperature_correction_scale", None)
+        if scale is None:
+            scale = float(device.attrs["temperature_coefficient_scale"].value)
+            self._temperature_correction_scale = scale
         raw = self._encode_temperature_coefficient(coefficient, scale)
         device.attrs["temperature_coefficient_raw"].value = str(raw)
         device.attrs["temperature_offset_raw"].value = str(offset)

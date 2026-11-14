@@ -240,6 +240,29 @@ def _discover_devices(
     )
 
 
+class _ScaleCache:
+    """Driver-fixed ``scale`` attributes, read once per IIO channel/device handle.
+
+    IIO ``scale`` values are constants of the loaded driver; a driver reload
+    requires a new context, which creates new handles and a new backend. Raw
+    values and user-writable corrections (``calibbias``) are never cached.
+    Handles are kept alive by the backend's discovered device sets, so their
+    ids are stable for its lifetime. Polling threads share the cache; a dict
+    store/load is atomic under the GIL and racing first reads agree.
+    """
+
+    def __init__(self) -> None:
+        self._values: dict[int, float] = {}
+
+    def get(self, owner: iio.Channel | iio.Device) -> float:
+        key = id(owner)
+        value = self._values.get(key)
+        if value is None:
+            value = float(owner.attrs["scale"].value)
+            self._values[key] = value
+        return value
+
+
 class IIOIDSBackend(IDSBackend):
     """Implement the non-SiPM IDS interface through network IIO devices.
 
@@ -273,6 +296,7 @@ class IIOIDSBackend(IDSBackend):
         self._ch = channel
         self._uri = uri
         self._hv_gain_v_per_mv = float(hv_gain_v_per_mv)
+        self._scales = _ScaleCache()
         self._ctx = iio.Context(uri)
         self._devices = _discover_devices(
             self._ctx, channel, selected_dac_channel,
@@ -316,6 +340,8 @@ class IIOIDSBackend(IDSBackend):
         self._hv_compens_mode = 0
         self._temp_digital_mode = 0
         self._compensated_hv_voltage = self._nominal_hv_voltage
+        # Last DAC code this backend wrote; None forces the first refresh.
+        self._last_dac_raw: int | None = None
 
         digital_temp_label = self._devices.digital_temp_label
         if digital_temp_label == _GLOBAL_TMP_LABEL:
@@ -350,37 +376,44 @@ class IIOIDSBackend(IDSBackend):
 
     def _read_dac_voltage(self, devices: _IDSDevices) -> float:
         raw = int(devices.hv_output.attrs["raw"].value)
-        scale_mv = float(devices.hv_output.attrs["scale"].value)
+        scale_mv = self._scales.get(devices.hv_output)
         return raw * scale_mv * self._hv_gain_v_per_mv
 
-    def _write_dac_voltage(self, devices: _IDSDevices, voltage: float) -> float:
+    def _write_dac_voltage(
+        self, devices: _IDSDevices, voltage: float, *, force: bool = True
+    ) -> float:
+        """Write the DAC code for *voltage*; return the voltage it represents.
+
+        With ``force=False`` (periodic compensation refresh) an unchanged
+        code is not rewritten: in mode 0, or while the temperature is
+        stable, the poll would otherwise rewrite the HV DAC every tick.
+        Explicit setpoint/compensation changes and safe shutdown always write.
+        """
         bounded = min(max(float(voltage), _HV_MIN_VOLTAGE), _HV_MAX_VOLTAGE)
-        scale_mv = float(devices.hv_output.attrs["scale"].value)
+        scale_mv = self._scales.get(devices.hv_output)
         raw = round(bounded / (scale_mv * self._hv_gain_v_per_mv))
         raw = min(max(raw, _DAC_MIN_RAW), _DAC_MAX_RAW)
-        devices.hv_output.attrs["raw"].value = str(raw)
+        if force or raw != self._last_dac_raw:
+            devices.hv_output.attrs["raw"].value = str(raw)
+            self._last_dac_raw = raw
         return raw * scale_mv * self._hv_gain_v_per_mv
 
     def _read_hv_feedback(self, devices: _IDSDevices) -> float:
         raw = int(devices.hv_feedback.attrs["raw"].value)
-        scale_mv = float(devices.adc.attrs["scale"].value)
+        scale_mv = self._scales.get(devices.adc)
         return raw * scale_mv * self._hv_gain_v_per_mv
 
-    @staticmethod
-    def _read_digital_temperature(devices: _IDSDevices) -> float:
+    def _read_digital_temperature(self, devices: _IDSDevices) -> float:
         if devices.digital_temp_input is None:
             return float("nan")
         raw = int(devices.digital_temp_input.attrs["raw"].value)
         # The TMP117 IIO scale is millidegrees Celsius per raw count.
-        scale_millidegrees = float(
-            devices.digital_temp_input.attrs["scale"].value
-        )
+        scale_millidegrees = self._scales.get(devices.digital_temp_input)
         return raw * scale_millidegrees / 1000.0
 
-    @staticmethod
-    def _read_analog_temperature(devices: _IDSDevices) -> float:
+    def _read_analog_temperature(self, devices: _IDSDevices) -> float:
         raw = int(devices.adc_temperature.attrs["raw"].value)
-        scale_mv = float(devices.adc.attrs["scale"].value)
+        scale_mv = self._scales.get(devices.adc)
         sensor_mv = raw * scale_mv
         return (
             sensor_mv - _MCP_TEMP_OFFSET_MV
@@ -410,14 +443,14 @@ class IIOIDSBackend(IDSBackend):
             return self._read_analog_temperature(devices)
         raise NotImplementedError(_COMPENSATION_MODE_UNSUPPORTED)
 
-    def _apply_compensation(self, devices: _IDSDevices) -> float:
+    def _apply_compensation(self, devices: _IDSDevices, *, force: bool = True) -> float:
         temperature = self._temperature_for_compensation(devices)
         target = self._nominal_hv_voltage
         if temperature is not None:
             target += self._hv_compens_ct * (
                 temperature - self._hv_compens_tref
             )
-        self._compensated_hv_voltage = self._write_dac_voltage(devices, target)
+        self._compensated_hv_voltage = self._write_dac_voltage(devices, target, force=force)
         return self._compensated_hv_voltage
 
     # ---- versions ----
@@ -448,10 +481,10 @@ class IIOIDSBackend(IDSBackend):
             )
         return float(self._temperature_correction_ads.attrs["raw"].value)
 
-    @staticmethod
-    def _read_scaled_temperature(channel: iio.Channel) -> float:
+    def _read_scaled_temperature(self, channel: iio.Channel) -> float:
         raw = float(channel.attrs["raw"].value)
-        scale = float(channel.attrs["scale"].value)
+        scale = self._scales.get(channel)
+        # offset/calibbias stay live reads: calibbias is user-writable.
         correction_attr = channel.attrs.get("offset") or channel.attrs.get("calibbias")
         correction = float(correction_attr.value) if correction_attr is not None else 0.0
         # IIO temperature scales are millidegrees Celsius per raw count.
@@ -503,7 +536,7 @@ class IIOIDSBackend(IDSBackend):
 
         for label, channel in devices.xadc_rails:
             raw = float(channel.attrs["raw"].value)
-            scale_mv = float(channel.attrs["scale"].value)
+            scale_mv = self._scales.get(channel)
             readings.append(GlobalDiagnosticReading(
                 f"rail_{label}", label.upper(), raw * scale_mv / 1000.0, "V", 3,
             ))
@@ -577,7 +610,7 @@ class IIOIDSBackend(IDSBackend):
         # and apply the software correction during the PSU worker's normal
         # polling cycle, using its dedicated context.
         with self._state_lock, self._monitor_lock:
-            return self._apply_compensation(self._monitor_devices)
+            return self._apply_compensation(self._monitor_devices, force=False)
 
     # ---- temperature sensors ----
 
