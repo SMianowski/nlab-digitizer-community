@@ -4,7 +4,6 @@ import logging
 import math
 import statistics
 import time
-from collections import deque
 from collections.abc import Callable
 from enum import Enum, auto
 from pathlib import Path
@@ -30,6 +29,7 @@ from nlab.hardware.digitizer.scope import (
 )
 from nlab.ui.ui_current_monitor_view import Ui_CurrentMonitorView
 from nlab.utils.recording_paths import measurement_folder, unique_recording_path
+from nlab.utils.sample_history import SampleHistory
 from nlab.views.current_capture_dialog import CurrentCaptureDialog
 from nlab.views.numeric_controls import (
     bind_numeric_control,
@@ -113,7 +113,7 @@ class CurrentMonitorController(QWidget):
         self._worker_thread: QThread | None = None
         self._stop_requested = False
         self._latest: CurrentSample | None = None
-        self._history: deque[CurrentSample] = deque()
+        self._history = SampleHistory()
         self._last_batch: tuple[CurrentSample, ...] = ()
         self._dropped_samples = 0
         self._monitor_error: str | None = None
@@ -484,9 +484,7 @@ class CurrentMonitorController(QWidget):
         self._last_batch = samples
         self._latest = samples[-1]
         self._history.extend(samples)
-        cutoff = self._latest.timestamp_ns - _HISTORY_NS
-        while self._history and self._history[0].timestamp_ns < cutoff:
-            self._history.popleft()
+        self._history.trim_before(self._latest.timestamp_ns - _HISTORY_NS)
         self.ui.btnZero.setEnabled(True)
         self._render_values(self._latest.timestamp_ns)
         status = "Recorded FPGA IIR samples; replay does not access hardware."
@@ -832,10 +830,10 @@ class CurrentMonitorController(QWidget):
         latest = self._latest
         if latest is None:
             return
-        cutoff = latest.timestamp_ns - _ZERO_WINDOW_NS
-        values = [sample.raw_code for sample in self._history if sample.timestamp_ns >= cutoff]
-        if values:
-            self.ui.spinZero.setValue(statistics.fmean(values))
+        history = self._history
+        values = history.raw_codes[history.since(latest.timestamp_ns - _ZERO_WINDOW_NS)]
+        if values.size:
+            self.ui.spinZero.setValue(float(values.mean()))
 
     @Slot()
     def _render_pending(self) -> None:
@@ -871,9 +869,7 @@ class CurrentMonitorController(QWidget):
                 self._last_batch = samples
                 self._latest = samples[-1]
                 self._history.extend(samples)
-                cutoff = self._latest.timestamp_ns - _HISTORY_NS
-                while self._history and self._history[0].timestamp_ns < cutoff:
-                    self._history.popleft()
+                self._history.trim_before(self._latest.timestamp_ns - _HISTORY_NS)
                 self.ui.btnZero.setEnabled(True)
             self._render_values(now_ns)
 
@@ -1068,24 +1064,20 @@ class CurrentMonitorController(QWidget):
                 f"n={len(batch_values)}"
             )
 
-        rate_samples = [
-            sample
-            for sample in self._history
-            if sample.timestamp_ns >= latest.timestamp_ns - _RATE_WINDOW_NS
-        ]
-        intervals_ns = [
-            right.timestamp_ns - left.timestamp_ns
-            for left, right in zip(rate_samples, rate_samples[1:])
-            if right.timestamp_ns > left.timestamp_ns
-        ]
+        history = self._history
+        recent = history.since(latest.timestamp_ns - _RATE_WINDOW_NS)
+        intervals_ns = np.diff(history.timestamps[recent])
+        intervals_ns = intervals_ns[intervals_ns > 0]
         rate_hz = 0.0
         median_interval_ns = 0.0
-        if intervals_ns:
-            median_interval_ns = statistics.median(intervals_ns)
-            rate_hz = 1_000_000_000 / statistics.fmean(intervals_ns)
+        if intervals_ns.size:
+            median_interval_ns = float(np.median(intervals_ns))
+            rate_hz = 1_000_000_000 / float(intervals_ns.mean())
         age_ns = max(0, now_ns - latest.timestamp_ns)
-        latencies_ms = [sample.read_latency_ns / 1_000_000 for sample in rate_samples]
-        median_latency_ms = statistics.median(latencies_ms) if latencies_ms else 0.0
+        latencies_ns = history.read_latencies_ns[recent]
+        median_latency_ms = (
+            float(np.median(latencies_ns)) / 1_000_000 if latencies_ns.size else 0.0
+        )
         self.ui.lblAcquisition.setText(
             f"{rate_hz:,.1f} Hz; median read {median_latency_ms:.3f} ms; "
             f"age {age_ns / 1_000_000:.1f} ms"
@@ -1102,13 +1094,10 @@ class CurrentMonitorController(QWidget):
             status += f" Display buffer dropped {self._dropped_samples:,} sample(s)."
         self.status.setText(status)
 
-        if self._history:
-            newest = self._history[-1]
-            x = [
-                -(newest.timestamp_ns - sample.timestamp_ns) / 1_000_000_000
-                for sample in self._history
-            ]
-            y = [self._convert(sample.raw_code, zero, scale) for sample in self._history]
+        if len(history):
+            timestamps = history.timestamps
+            x = (timestamps - timestamps[-1]) / 1_000_000_000
+            y = (history.raw_codes - zero) * scale
             # The same item is reused after switching back from raw DMA pulses
             # to the host-timed scalar IIR trend; restore ordinary line drawing.
             self._curve.setData(x, y, stepMode=None, connect="auto")

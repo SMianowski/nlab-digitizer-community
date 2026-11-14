@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Polling workers (MCA, Power Supply, Global diagnostics and temperature correction,
   Current IIR monitor, external devices) share one thread helper,
   `nlab/workers/worker_thread.py`, for wiring and for the never-terminate join.
+- The Current monitor keeps its 10 s IIR history as NumPy columns
+  (`nlab/utils/sample_history.py`); the trend plot, rate, latency and zero estimates
+  are vectorized instead of rebuilding Python lists of every sample each frame.
 - Session replay playback (state, the four playback timers and ~950 lines) moved out
   of the main window into `nlab/controllers/session_replay_coordinator.py`. The main
   window keeps the public replay API and the shared hardware interlock; replay
