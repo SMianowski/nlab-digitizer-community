@@ -11,7 +11,10 @@ import pytest
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from pytestqt.qtbot import QtBot
 
-from nlab.controllers.current_monitor_controller import CurrentMonitorController
+from nlab.controllers.current_monitor_controller import (
+    CurrentAcquisition,
+    CurrentMonitorController,
+)
 from nlab.hardware.digitizer.backends import iio_backend as iio_backend_module
 from nlab.hardware.digitizer.backends.iio_backend import IIODigitizerBackend
 from nlab.hardware.digitizer.current_monitor import (
@@ -198,7 +201,7 @@ def test_controller_starts_stopped_by_default(qtbot: QtBot) -> None:
 
     assert controller._worker is None
     assert controller._worker_thread is None
-    assert not controller._dma_active
+    assert controller._acquisition is CurrentAcquisition.IDLE
     assert controller.ui.btnStart.isEnabled()
     assert not controller.ui.btnStop.isEnabled()
     assert controller.status.text() == "Monitor stopped."

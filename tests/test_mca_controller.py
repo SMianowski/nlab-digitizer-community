@@ -205,7 +205,6 @@ def test_dma_stop_keeps_start_interlocked_until_worker_finishes() -> None:
     worker = Mock()
     controller = _controller(
         _channel=0,
-        _coincidence_session=False,
         _dma_worker=worker,
         _cancel_debug_marker_drags=Mock(),
         _stop_worker=Mock(),

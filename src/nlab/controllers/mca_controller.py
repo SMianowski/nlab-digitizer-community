@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum, auto
 from pathlib import Path
 from typing import Protocol
 
@@ -92,6 +93,21 @@ _MCA_TIMING_PARAMETERS = frozenset({
     MCAParam.TRAPEZ_R, MCAParam.TRAPEZ_M, MCAParam.TRAPEZ_E,
     MCAParam.CC_TIME, MCAParam.PSD_ZC_LOW, MCAParam.PSD_ZC_HIGH,
 })
+
+
+class CoincidenceRole(Enum):
+    """This MCA's part in a paired coincidence session."""
+
+    NONE = auto()
+    ACTIVE = auto()  # owned by the coincidence coordinator, capturing
+    STOPPING = auto()  # coordinator requested stop; tail still draining
+
+
+def _coincidence_role(owner: object) -> CoincidenceRole:
+    """Tolerates lightweight owners (unbound calls) that never joined a session."""
+    role = getattr(owner, "_coincidence_role", CoincidenceRole.NONE)
+    assert isinstance(role, CoincidenceRole)
+    return role
 
 
 def _mca_widget_spec(parameter: MCAParam) -> RangeSpec:
@@ -216,8 +232,7 @@ class MCAController(QWidget):
         self._dma_started_monotonic = 0.0
         self._coincidence_buffer: McaEventBuffer | None = None
         self._coincidence_metadata: dict[str, object] | None = None
-        self._coincidence_session = False
-        self._coincidence_stopping = False
+        self._coincidence_role = CoincidenceRole.NONE
 
         self._last_histogram: np.ndarray | None = None
         self._display_histogram: np.ndarray | None = None
@@ -282,7 +297,7 @@ class MCAController(QWidget):
         if enabled and (
             self._worker is not None
             or self._dma_worker is not None
-            or self._coincidence_session
+            or _coincidence_role(self) is not CoincidenceRole.NONE
         ):
             self._on_stop()
         for widget in (
@@ -300,12 +315,12 @@ class MCAController(QWidget):
             self.ui.btnStart.setEnabled(
                 self._worker is None
                 and self._dma_worker is None
-                and not self._coincidence_session
+                and _coincidence_role(self) is CoincidenceRole.NONE
             )
             self.ui.btnStop.setEnabled(
                 self._worker is not None
                 or self._dma_worker is not None
-                or self._coincidence_session
+                or _coincidence_role(self) is not CoincidenceRole.NONE
             )
             self.refresh_dma_output_settings()
 
@@ -638,7 +653,7 @@ class MCAController(QWidget):
         # DMA selection now belongs to Measurement rather than groupMca;
         # preserve its acquisition/replay and coincidence interlocks explicitly.
         self.ui.cbDmaEnable.setEnabled(
-            enabled and not getattr(self, "_coincidence_session", False)
+            enabled and not _coincidence_role(self) is not CoincidenceRole.NONE
             and not self.measurement_active and self._worker is None
         )
         self.ui.groupSignal.setEnabled(enabled)
@@ -1135,7 +1150,7 @@ class MCAController(QWidget):
 
     @property
     def coincidence_active(self) -> bool:
-        return self._coincidence_session
+        return _coincidence_role(self) is not CoincidenceRole.NONE
 
     @property
     def coincidence_run_summary(self) -> McaRunSummary | None:
@@ -1150,7 +1165,7 @@ class MCAController(QWidget):
         """Start this channel as one half of a coordinated IIO run."""
         if self._replay_hardware_interlocked:
             raise RuntimeError("exit session replay before starting coincidence")
-        if self.coincidence_busy or self._coincidence_session:
+        if self.coincidence_busy or _coincidence_role(self) is not CoincidenceRole.NONE:
             raise RuntimeError(f"MCA ch{self._channel} is already in use")
         if self._mca_dma is None:
             raise RuntimeError("coincidence requires IIO MCA list-mode DMA")
@@ -1158,8 +1173,7 @@ class MCAController(QWidget):
         self._event_buffer.subscribe(event_buffer)
         self._coincidence_buffer = event_buffer
         self._coincidence_metadata = metadata
-        self._coincidence_session = True
-        self._coincidence_stopping = False
+        self._coincidence_role = CoincidenceRole.ACTIVE
         self._dma_filepath = filepath
         self.ui.cbDmaEnable.setChecked(True)
         self.ui.cbDmaEnable.setEnabled(False)
@@ -1175,7 +1189,7 @@ class MCAController(QWidget):
             self._event_buffer.unsubscribe(event_buffer)
             self._coincidence_buffer = None
             self._coincidence_metadata = None
-            self._coincidence_session = False
+            self._coincidence_role = CoincidenceRole.NONE
             self._set_controls_enabled(True)
             self.ui.cbDmaEnable.setEnabled(True)
             self.ui.btnStart.setEnabled(True)
@@ -1183,9 +1197,9 @@ class MCAController(QWidget):
             raise
 
     def stop_coincidence_capture(self) -> None:
-        if not self._coincidence_session:
+        if _coincidence_role(self) is CoincidenceRole.NONE:
             return
-        self._coincidence_stopping = True
+        self._coincidence_role = CoincidenceRole.STOPPING
         self._on_stop()
         if self._dma_worker is None:
             self._end_coincidence_capture()
@@ -1198,14 +1212,13 @@ class MCAController(QWidget):
             self.ui.btnDmaFile.setEnabled(False)
 
     def _end_coincidence_capture(self) -> None:
-        if not self._coincidence_session:
+        if _coincidence_role(self) is CoincidenceRole.NONE:
             return
         if self._coincidence_buffer is not None:
             self._event_buffer.unsubscribe(self._coincidence_buffer)
         self._coincidence_buffer = None
         self._coincidence_metadata = None
-        self._coincidence_session = False
-        self._coincidence_stopping = False
+        self._coincidence_role = CoincidenceRole.NONE
         enabled = not (
             getattr(self, "_replay_hardware_interlocked", False)
             or getattr(self, "_connection_lost", False)
@@ -1387,8 +1400,9 @@ class MCAController(QWidget):
         if (self._connection_lost or self._replay_hardware_interlocked
                 or self._session_replay_active or self._worker is not None
                 or self._dma_worker is not None or self._worker_thread is not None
-                or self._dma_thread is not None or self._coincidence_session
-                or self._coincidence_stopping or self.measurement_active):
+                or self._dma_thread is not None
+                or _coincidence_role(self) is not CoincidenceRole.NONE
+                or self.measurement_active):
             raise RuntimeError("Target MCA is busy, disconnected, or replay-interlocked")
 
     def gate_transfer_current(self) -> McaGateTiming:
@@ -1976,7 +1990,7 @@ class MCAController(QWidget):
         )
 
     def _on_stop(self) -> None:
-        if getattr(self, "_coincidence_session", False) and not self._coincidence_stopping:
+        if _coincidence_role(self) is CoincidenceRole.ACTIVE:
             self.coincidence_stop_requested.emit()
             return
         self._cancel_debug_marker_drags()
@@ -2018,7 +2032,7 @@ class MCAController(QWidget):
         """
         log.info("MCA ch%d: measurement completed by hardware (time limit)", self._channel)
         MCAController._set_measurement_active(self, False)
-        if getattr(self, "_coincidence_session", False) and not self._coincidence_stopping:
+        if _coincidence_role(self) is CoincidenceRole.ACTIVE:
             self.coincidence_stop_requested.emit()
             return
         if self._dma_worker is not None:
@@ -2397,7 +2411,7 @@ class MCAController(QWidget):
         if mode is McaDmaOutputMode.ONLINE:
             status = (
                 "Arming IIO DMA (online coincidence, no file)..."
-                if getattr(self, "_coincidence_session", False)
+                if _coincidence_role(self) is not CoincidenceRole.NONE
                 else (
                     "Arming IIO DMA (online PSD, no file)..."
                     if self._psd_capture_enabled
@@ -2465,7 +2479,7 @@ class MCAController(QWidget):
         if self._active_dma_mode is McaDmaOutputMode.ONLINE:
             status = (
                 "Streaming to coincidence (no file)..."
-                if getattr(self, "_coincidence_session", False)
+                if _coincidence_role(self) is not CoincidenceRole.NONE
                 else (
                     "Streaming to PSD (no file)..."
                     if self._psd_capture_enabled
@@ -2476,7 +2490,7 @@ class MCAController(QWidget):
             status = f"Recording {self._active_dma_mode.value} file..."
         self.status.setText(status)
         log.info("MCA ch%d: DMA + measurement started", self._channel)
-        if getattr(self, "_coincidence_session", False):
+        if _coincidence_role(self) is not CoincidenceRole.NONE:
             self.coincidence_ready.emit(self._channel)
 
     def _on_dma_progress(self, event_count: int) -> None:
@@ -2484,7 +2498,7 @@ class MCAController(QWidget):
         if self._active_dma_mode is McaDmaOutputMode.ONLINE:
             action = (
                 "Coincidence stream (no file)"
-                if getattr(self, "_coincidence_session", False)
+                if _coincidence_role(self) is not CoincidenceRole.NONE
                 else "PSD stream (no file)"
                 if self._psd_capture_enabled
                 else "DMA (no file or PSD)"
@@ -2501,7 +2515,7 @@ class MCAController(QWidget):
         self.status.setText(f"Error: {message}")
         if self._psd_capture is not None:
             self._psd_capture.set_capture_error(message)
-        if getattr(self, "_coincidence_session", False):
+        if _coincidence_role(self) is not CoincidenceRole.NONE:
             self.coincidence_error.emit(self._channel, message)
 
     def _on_dma_summary(self, summary: McaRunSummary) -> None:
@@ -2545,10 +2559,11 @@ class MCAController(QWidget):
             if self._dma_summary is None and self._dma_error is None:
                 self.status.setText("Stopped (run health unavailable)")
             self._finish_psd_capture()
-            if getattr(self, "_coincidence_session", False):
-                if not self._coincidence_stopping:
+            if _coincidence_role(self) is not CoincidenceRole.NONE:
+                if _coincidence_role(self) is CoincidenceRole.ACTIVE:
                     self.coincidence_stop_requested.emit()
-                if self._coincidence_stopping:
+                # The coordinator may have begun stopping during that emit.
+                if _coincidence_role(self) is CoincidenceRole.STOPPING:
                     self._end_coincidence_capture()
             else:
                 enabled = not (

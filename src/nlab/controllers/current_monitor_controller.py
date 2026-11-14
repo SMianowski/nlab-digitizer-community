@@ -6,6 +6,7 @@ import statistics
 import time
 from collections import deque
 from collections.abc import Callable
+from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -52,6 +53,15 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+
+class CurrentAcquisition(Enum):
+    """The one live acquisition this Current view owns (at most one at a time)."""
+
+    IDLE = auto()
+    IIR = auto()  # input-filter polling on this view's worker thread
+    SCOPE_DMA = auto()  # periodic Scope DMA owned by the Scope controller
+    SUMS = auto()  # periodic sums in a Scope sum reader process
+
 _DISPLAY_HZ = 30
 _DISPLAY_PERIOD_NS = round(1_000_000_000 / _DISPLAY_HZ)
 _TARGET_SAMPLE_HZ = 1000
@@ -95,9 +105,7 @@ class CurrentMonitorController(QWidget):
         self._channel = channel
         self._scope_controller = scope_controller
         self._scope_current_accumulator = scope_current_accumulator
-        self._dma_active = False
-        self._sum_active = False
-        self._sum_replay_active = False
+        self._acquisition = CurrentAcquisition.IDLE
         self._sum_worker: ScopeSumWorker | None = None
         self._last_mode_index: int | None = None
         self._sample_buffer = CurrentSampleBuffer()
@@ -202,8 +210,7 @@ class CurrentMonitorController(QWidget):
 
     def _is_running(self) -> bool:
         return (
-            self._worker_thread is not None or self._dma_active
-            or self._sum_active or self._sum_replay_active
+            self._acquisition is not CurrentAcquisition.IDLE
         )
 
     def _sum_supported(self) -> bool:
@@ -230,7 +237,6 @@ class CurrentMonitorController(QWidget):
         wanted = (
             running
             and self.ui.cbPauseReadbacks.isChecked()
-            and not self._sum_replay_active
             and not self._replay_hardware_interlocked
         )
         if wanted != getattr(self, "_readback_pause_requested", False):
@@ -248,7 +254,9 @@ class CurrentMonitorController(QWidget):
             record_widget.setEnabled(record_enabled)
         self.ui.btnOpenSums.setEnabled(True)
         self.ui.spinSumSamples.setEnabled(record_enabled)
-        self.ui.btnStop.setText("Stop and drain" if self._sum_active else "Stop")
+        self.ui.btnStop.setText(
+            "Stop and drain" if self._acquisition is CurrentAcquisition.SUMS else "Stop"
+        )
         if self._replay_hardware_interlocked:
             for widget in (
                 self.ui.btnStart,
@@ -259,7 +267,7 @@ class CurrentMonitorController(QWidget):
             ):
                 widget.setEnabled(False)
             self.ui.labelDmaGap.setEnabled(False)
-            self.ui.btnStop.setEnabled(self._sum_replay_active)
+            self.ui.btnStop.setEnabled(False)
             return
         self.ui.btnStart.setEnabled(not running and (not sum_mode or self._sum_supported()))
         self.ui.btnStop.setEnabled(running)
@@ -416,6 +424,7 @@ class CurrentMonitorController(QWidget):
         thread = create_worker_thread(self, worker, on_finished=self._on_worker_finished)
         self._worker = worker
         self._worker_thread = thread
+        self._acquisition = CurrentAcquisition.IIR
         self._stop_requested = False
         self._monitor_error = None
         self._last_dma_render_generation = -1
@@ -542,7 +551,7 @@ class CurrentMonitorController(QWidget):
             self.status.setText(self._monitor_error)
             log.exception("Starting Current periodic sums failed")
             return
-        self._sum_active = True
+        self._acquisition = CurrentAcquisition.SUMS
         self._stop_requested = False
         self._set_running_controls(True)
         self.status.setText("Acquiring periodic sums; Stop drains accepted tail windows.")
@@ -596,11 +605,11 @@ class CurrentMonitorController(QWidget):
         worker = self._sum_worker
         if worker is None or not worker.done:
             return
-        if self._sum_active and self._scope_controller is not None:
+        if self._acquisition is CurrentAcquisition.SUMS and self._scope_controller is not None:
             self._scope_controller.finish_current_sum_monitor()
         worker.join()
         self._display_timer.stop()
-        self._sum_active = self._sum_replay_active = False
+        self._acquisition = CurrentAcquisition.IDLE
         self._stop_requested = False
         self._set_running_controls(False)
         self.status.setText(worker.message)
@@ -632,8 +641,6 @@ class CurrentMonitorController(QWidget):
             )
             if not worker.done:
                 state = "Draining accepted tail windows" if self._stop_requested else "Live sums"
-                if self._sum_replay_active:
-                    state = "Recorded sums"
                 self.status.setText(
                     f"{state}; IP{snapshot.get('ip_version')}; "
                     f"N={snapshot.get('samples_per_window')} samples; "
@@ -668,7 +675,7 @@ class CurrentMonitorController(QWidget):
             log.exception("Starting Scope DMA current monitor failed")
             return
 
-        self._dma_active = True
+        self._acquisition = CurrentAcquisition.SCOPE_DMA
         self._set_running_controls(True)
         self.status.setText(
             "Starting periodic Scope DMA current monitoring "
@@ -685,13 +692,13 @@ class CurrentMonitorController(QWidget):
         if self._stop_requested:
             return
         self._stop_requested = True
-        if self._sum_active or self._sum_replay_active:
+        if self._acquisition is CurrentAcquisition.SUMS:
             if self._sum_worker is not None:
                 self._sum_worker.request_stop()
             self.ui.btnStop.setEnabled(False)
             self.status.setText("Stopping; draining accepted windows and closing the transport...")
             return
-        if self._dma_active:
+        if self._acquisition is CurrentAcquisition.SCOPE_DMA:
             if self._scope_controller is not None:
                 self._scope_controller.stop_current_dma_monitor()
             self.ui.btnStop.setEnabled(False)
@@ -703,18 +710,18 @@ class CurrentMonitorController(QWidget):
 
     def stop_monitor_sync(self) -> None:
         """Stop the selected transport and wait for resource release."""
-        if self._sum_active or self._sum_replay_active:
+        if self._acquisition is CurrentAcquisition.SUMS:
             worker = self._sum_worker
             if worker is not None:
                 worker.request_stop()
                 worker.join()
                 self._render_sum_snapshot()
             return
-        if self._dma_active:
+        if self._acquisition is CurrentAcquisition.SCOPE_DMA:
             self._stop_requested = True
             if self._scope_controller is not None:
                 self._scope_controller.stop_current_dma_monitor(wait=True)
-            if self._dma_active:
+            if self._acquisition is CurrentAcquisition.SCOPE_DMA:
                 self._finish_dma_monitor("Monitor stopped.")
             return
 
@@ -724,6 +731,8 @@ class CurrentMonitorController(QWidget):
         join_worker_thread(self._worker_thread, label="Current monitor", warn_after_ms=4000)
         self._worker = None
         self._worker_thread = None
+        if self._acquisition is CurrentAcquisition.IIR:
+            self._acquisition = CurrentAcquisition.IDLE
         self._stop_requested = False
         self._display_timer.stop()
         self._render_pending()
@@ -735,6 +744,8 @@ class CurrentMonitorController(QWidget):
     def _on_worker_finished(self) -> None:
         self._worker = None
         self._worker_thread = None
+        if self._acquisition is CurrentAcquisition.IIR:
+            self._acquisition = CurrentAcquisition.IDLE
         self._stop_requested = False
         self._display_timer.stop()
         self._render_pending()
@@ -744,7 +755,7 @@ class CurrentMonitorController(QWidget):
 
     @Slot(bool, str)
     def _on_scope_dma_state_changed(self, running: bool, message: str) -> None:
-        if not self._dma_active:
+        if self._acquisition is not CurrentAcquisition.SCOPE_DMA:
             return
         if running:
             self.status.setText(message)
@@ -753,7 +764,7 @@ class CurrentMonitorController(QWidget):
 
     def _finish_dma_monitor(self, message: str) -> None:
         self._display_timer.stop()
-        self._dma_active = False
+        self._acquisition = CurrentAcquisition.IDLE
         self._render_pending()
         self._stop_requested = False
         self._set_running_controls(False)

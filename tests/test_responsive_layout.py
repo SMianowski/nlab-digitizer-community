@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QBoxLayout, QScrollArea, QWidget
 from pytestqt.qtbot import QtBot
 
 from nlab.app import MainAppWindow
-from nlab.controllers.mca_controller import MCAController
+from nlab.controllers.mca_controller import CoincidenceRole, MCAController
 from nlab.hardware.digitizer.offline import create_offline_digitizer
 from nlab.ui.ui_external_device_view import Ui_ExternalDeviceView
 from nlab.ui.ui_global_view import Ui_GlobalView
@@ -315,10 +315,10 @@ def test_mca_relocated_dma_checkbox_retains_configuration_and_interlocks(qtbot: 
     assert not view.ui.cbDmaEnable.isEnabled()
     view._set_controls_enabled(True)
     assert view.ui.cbDmaEnable.isEnabled()
-    view._coincidence_session = True
+    view._coincidence_role = CoincidenceRole.ACTIVE
     view._set_controls_enabled(True)
     assert not view.ui.cbDmaEnable.isEnabled()
-    view._coincidence_session = False
+    view._coincidence_role = CoincidenceRole.NONE
     view.set_replay_hardware_interlock(True)
     assert not view.ui.cbDmaEnable.isEnabled()
     view.set_replay_hardware_interlock(False)

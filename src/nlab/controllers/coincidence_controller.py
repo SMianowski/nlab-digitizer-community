@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -64,6 +65,15 @@ from nlab.views.plot_viewbox import ModifierZoomViewBox
 from nlab.workers.coincidence_worker import CoincidenceAnalysisThread
 
 log = logging.getLogger(__name__)
+
+
+class CoincidenceState(StrEnum):
+    """Paired-session lifecycle; values are recorded in the session manifest."""
+
+    IDLE = "idle"
+    ARMING = "arming"  # both readers arming; shared START still LOW
+    RUNNING = "running"  # shared START asserted
+    STOPPING = "stopping"  # START lowered; both streams draining
 _CHANNELS = (0, 1)
 _START_BUTTON_STYLE = """QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }
 QPushButton:checked { background-color: #2E7D32; border: 2px solid #1B5E20; }
@@ -103,7 +113,7 @@ class CoincidenceController(QWidget):
         if len(self._channel_labels) != 2:
             raise ValueError("channel_labels must contain two entries")
         self._sync = devices[0].mca.sync
-        self._state = "idle"
+        self._state = CoincidenceState.IDLE
         self._replay_hardware_interlocked = False
         self._run_error: str | None = None
         self._session_id: str | None = None
@@ -562,7 +572,7 @@ class CoincidenceController(QWidget):
         self.matrix_projection0_curve.setData(edges, projection0)
         self.matrix_projection1_curve.setData(edges, projection1)
         scale_description = "signed log10(1 + |count|)" if logarithmic else "linear counts"
-        completeness = "Live provisional" if self._state in {"arming", "running"} else "Drained"
+        completeness = "Live provisional" if self._is_live else "Drained"
         matrix_detail = (
             f"{completeness} {COINCIDENCE_MATRIX_BINS}x{COINCIDENCE_MATRIX_BINS} {mode} matrix; "
             f"prompt pairs {snapshot.pairs:,}; delayed-random pairs {snapshot.random_pairs:,}; "
@@ -607,7 +617,7 @@ class CoincidenceController(QWidget):
                     **self._manifest(
                         status=(
                             "live_provisional"
-                            if self._state in {"arming", "running"}
+                            if self._is_live
                             else "complete"
                         )
                     ),
@@ -627,7 +637,9 @@ class CoincidenceController(QWidget):
         if self._session_manifest is not None:
             write_configuration(
                 self._session_manifest,
-                self._manifest(status="complete" if self._state == "idle" else self._state),
+                self._manifest(
+                    status="complete" if self._state is CoincidenceState.IDLE else self._state.value
+                ),
             )
         self.status.setText(f"Coincidence matrix exported to {path}")
 
@@ -788,7 +800,7 @@ class CoincidenceController(QWidget):
         self.timing_box.setToolTip(self.timing_hint.text())
         if self._analysis is not None:
             self._last_rendered_snapshot = self._analysis.result()[0]
-        if self._analysis is not None and self._state in {"arming", "running"}:
+        if self._analysis is not None and self._is_live:
             self._analysis_epochs.append(
                 {"changed_utc": datetime.now(UTC).isoformat(), "settings": self._describe(settings)}
             )
@@ -859,7 +871,7 @@ class CoincidenceController(QWidget):
                     for channel, view in enumerate(self._mca_views)
                     if (summary := view.coincidence_run_summary) is not None
                 }
-                if status != "arming"
+                if status != CoincidenceState.ARMING
                 else {}
             ),
             "error": self._run_error,
@@ -925,10 +937,15 @@ class CoincidenceController(QWidget):
             },
         }
 
+    @property
+    def _is_live(self) -> bool:
+        """Readers are arming or capturing (results are still provisional)."""
+        return self._state in {CoincidenceState.ARMING, CoincidenceState.RUNNING}
+
     def start(self) -> None:
         if self._replay_hardware_interlocked:
             return
-        if self._state != "idle":
+        if self._state is not CoincidenceState.IDLE:
             return
         try:
             settings = self._settings()
@@ -970,7 +987,7 @@ class CoincidenceController(QWidget):
                 view.ui.cbDmaEnable.isChecked() for view in self._mca_views
             )  # type: ignore[assignment]
             self._prior_source = self._sync.get_trig_src()
-            self._state = "arming"
+            self._state = CoincidenceState.ARMING
             self.session_state.emit(
                 "started",
                 {
@@ -1013,13 +1030,13 @@ class CoincidenceController(QWidget):
             self.status.setText("Waiting for both DMA readers to arm…")
         except Exception as exc:
             log.exception("Could not start coincidence session")
-            if self._state == "idle":
+            if self._state is CoincidenceState.IDLE:
                 self.status.setText(f"Start blocked: {exc}")
             else:
                 self._begin_stop(str(exc))
 
     def _on_channel_ready(self, channel: int) -> None:
-        if self._state != "arming":
+        if self._state is not CoincidenceState.ARMING:
             return
         self._ready.add(channel)
         self.status.setText(f"DMA readers ready: {len(self._ready)}/2")
@@ -1037,7 +1054,7 @@ class CoincidenceController(QWidget):
                     raise RuntimeError("An MCA was not fully armed for external start")
             self._sync.set_sw_trig(1)
             self._arm_timer.stop()
-            self._state = "running"
+            self._state = CoincidenceState.RUNNING
             self.status.setText(
                 "Both channels started together; live all-pairs results are provisional "
                 "until both streams stop and drain."
@@ -1048,26 +1065,26 @@ class CoincidenceController(QWidget):
 
     def _on_channel_error(self, channel: int, message: str) -> None:
         detail = f"CH{channel}: {message}"
-        if self._state == "stopping":
+        if self._state is CoincidenceState.STOPPING:
             self._run_error = f"{self._run_error}; {detail}" if self._run_error else detail
         else:
             self._begin_stop(detail)
 
     def _on_channel_finished(self, channel: int) -> None:
         self._finished.add(channel)
-        if self._state == "arming":
+        if self._state is CoincidenceState.ARMING:
             self._begin_stop(f"CH{channel} DMA ended before synchronized start")
-        elif self._state == "running":
+        elif self._state is CoincidenceState.RUNNING:
             # A configured time limit may stop one producer first. Its run
             # summary still decides whether the paired session is healthy.
             self._begin_stop(None)
-        if self._state == "stopping" and len(self._finished) == 2:
+        if self._state is CoincidenceState.STOPPING and len(self._finished) == 2:
             self._analysis_stop_after_dma()
 
     def _begin_stop(self, error: str | None) -> None:
-        if self._state not in {"arming", "running"}:
+        if not self._is_live:
             return
-        self._state = "stopping"
+        self._state = CoincidenceState.STOPPING
         self.btnStop.setChecked(True)
         self._arm_timer.stop()
         if error is not None:
@@ -1156,7 +1173,7 @@ class CoincidenceController(QWidget):
             except OSError as exc:
                 self._run_error = f"{self._run_error or 'Manifest'}; {exc}"
                 log.exception("Could not finish coincidence session manifest")
-        self._state = "idle"
+        self._state = CoincidenceState.IDLE
         self._buffers = None
         self.btnStart.setChecked(False)
         self.btnStart.setEnabled(not self._replay_hardware_interlocked)
@@ -1181,7 +1198,7 @@ class CoincidenceController(QWidget):
         if analysis is None:
             return
         snapshot, error = analysis.result()
-        if error is not None and self._state in {"arming", "running"}:
+        if error is not None and self._is_live:
             self._begin_stop(error)
         if snapshot is self._last_rendered_snapshot:
             return
@@ -1211,7 +1228,7 @@ class CoincidenceController(QWidget):
         self.energy_curve0.setData(np.arange(16_385), snapshot.energy_ch0)
         self.energy_curve1.setData(np.arange(16_385), snapshot.energy_ch1)
         self._render_matrix(snapshot)
-        completeness = "Live provisional" if self._state in {"arming", "running"} else "Drained"
+        completeness = "Live provisional" if self._is_live else "Drained"
         self.counts_label.setText(
             f"Random sideband pairs: {snapshot.random_pairs:,} | "
             f"{completeness}  •  Pairs: {snapshot.pairs:,}  •  "
@@ -1377,7 +1394,7 @@ class CoincidenceController(QWidget):
             -0.5 * np.square((x - fit.center_ns) / fit.sigma_ns)
         )
         self.delay_fit_curve.setData(x, y)
-        completeness = "Live provisional" if self._state in {"arming", "running"} else "Drained"
+        completeness = "Live provisional" if self._is_live else "Drained"
         quality = "non-Gaussian/poor fit" if fit.reduced_chi_square > 3.0 else "Gaussian-core fit"
         self.timing_fit_label.setText(
             f"{completeness} {quality}: center {fit.center_ns:+.3f} ns; "
@@ -1409,7 +1426,7 @@ class CoincidenceController(QWidget):
 
     @property
     def active(self) -> bool:
-        return self._state != "idle"
+        return self._state is not CoincidenceState.IDLE
 
     def set_replay_hardware_interlock(
         self, enabled: bool, *, resume_background: bool = True,
@@ -1468,7 +1485,7 @@ class CoincidenceController(QWidget):
         self._arm_timer.stop()
         self._finish_timer.stop()
         self._display_timer.stop()
-        if self._state in {"arming", "running"}:
+        if self._is_live:
             self._begin_stop(None)
 
     def finish_shutdown_sync(self) -> None:
@@ -1479,5 +1496,5 @@ class CoincidenceController(QWidget):
             if self._analysis.is_alive():
                 log.error("Coincidence analysis did not finish before shutdown")
                 return
-        if self._state == "stopping":
+        if self._state is CoincidenceState.STOPPING:
             self._finish_if_ready()

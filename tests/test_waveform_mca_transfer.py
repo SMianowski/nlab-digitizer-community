@@ -14,7 +14,7 @@ from pytestqt.qtbot import QtBot
 from nlab.analysis.waveform_mca_gates import WaveformGateSource
 from nlab.app import MainAppWindow
 from nlab.controllers.main_window_controller import MainWindowController
-from nlab.controllers.mca_controller import MCAController
+from nlab.controllers.mca_controller import CoincidenceRole, MCAController
 from nlab.hardware.digitizer.dma import FILE_HEADER_STRUCT, FILE_MAGIC, FILE_VERSION
 from nlab.hardware.digitizer.mca import McaGateTiming, MultiChannelAnalyzer
 from nlab.hardware.digitizer.offline import create_offline_digitizer
@@ -163,17 +163,21 @@ def test_invalid_presets_never_read_or_write_backend(timing: McaGateTiming) -> N
     assert backend.mock_calls == []
 
 
-@pytest.mark.parametrize("flag", ["_connection_lost", "_replay_hardware_interlocked",
-                                  "_session_replay_active", "_worker", "_dma_worker",
-                                  "_worker_thread", "_dma_thread", "_coincidence_session",
-                                  "_coincidence_stopping", "_measurement_active"])
-def test_controller_interlocks_block_transfer(qtbot: QtBot, flag: str) -> None:
+@pytest.mark.parametrize(("flag", "value"), [
+    *((name, True) for name in (
+        "_connection_lost", "_replay_hardware_interlocked", "_session_replay_active",
+        "_worker", "_dma_worker", "_worker_thread", "_dma_thread", "_measurement_active",
+    )),
+    ("_coincidence_role", CoincidenceRole.ACTIVE),
+    ("_coincidence_role", CoincidenceRole.STOPPING),
+])
+def test_controller_interlocks_block_transfer(qtbot: QtBot, flag: str, value: object) -> None:
     device = create_offline_digitizer(0)
     view = MCAController(device.mca)
     qtbot.addWidget(view)
     before = device.mca.gate_timing()
     previous = getattr(view, flag)
-    setattr(view, flag, True)
+    setattr(view, flag, value)
     try:
         with pytest.raises(RuntimeError, match="busy, disconnected"):
             view.apply_gate_timing(McaGateTiming(32, 504, 56, True))

@@ -158,12 +158,12 @@ def test_current_checkbox_requests_pause_only_while_running(qtbot: QtBot) -> Non
     assert requests == [True, False, True, False]
 
 
-def test_sum_replay_never_pauses_live_polling(qtbot: QtBot) -> None:
+def test_session_replay_never_pauses_live_polling(qtbot: QtBot) -> None:
     controller = _current(qtbot)
     requests: list[bool] = []
     controller.readback_pause_changed.connect(requests.append)
     controller.ui.cbPauseReadbacks.setChecked(True)
-    controller._sum_replay_active = True
+    controller.set_replay_hardware_interlock(True)
     controller._set_running_controls(True)
     assert requests == []
 
