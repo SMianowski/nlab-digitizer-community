@@ -194,7 +194,7 @@ def test_polling_finish_waits_before_releasing_thread_wrappers() -> None:
         _channel=0,
     )
 
-    MCAController._on_worker_finished(controller)  # type: ignore[arg-type]
+    MCAController._on_worker_finished(controller, thread)  # type: ignore[arg-type]
 
     assert events == ["wait:2000", "delete"]
     assert controller._worker_thread is None

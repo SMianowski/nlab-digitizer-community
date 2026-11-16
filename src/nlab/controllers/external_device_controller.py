@@ -563,7 +563,9 @@ class ExternalDeviceController(QWidget):
         if self._worker is not None:
             self._worker.change_interval.emit(value)
 
-    def _on_polling_finished(self) -> None:
+    def _on_polling_finished(self, thread: QThread) -> None:
+        if thread is not self._worker_thread:
+            return  # an earlier poller; a restarted one is running
         self._worker = None
         self._worker_thread = None
         self._worker_stop_requested = False

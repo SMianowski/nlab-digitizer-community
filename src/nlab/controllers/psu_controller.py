@@ -323,7 +323,9 @@ class PSUController(QWidget):
         self.ui.btnStopMonitor.setEnabled(False)
         log.info("PSU: monitoring stop requested")
 
-    def _on_monitor_finished(self) -> None:
+    def _on_monitor_finished(self, thread: QThread) -> None:
+        if thread is not self._worker_thread:
+            return  # an earlier monitor; a restarted one is running
         self._worker = None
         self._worker_thread = None
         self._worker_stop_requested = False

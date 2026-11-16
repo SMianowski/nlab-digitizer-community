@@ -739,7 +739,9 @@ class CurrentMonitorController(QWidget):
             self.status.setText("Monitor stopped.")
 
     @Slot()
-    def _on_worker_finished(self) -> None:
+    def _on_worker_finished(self, thread: QThread) -> None:
+        if thread is not self._worker_thread:
+            return  # an earlier monitor; a restarted one is running
         self._worker = None
         self._worker_thread = None
         if self._acquisition is CurrentAcquisition.IIR:

@@ -151,7 +151,7 @@ def test_controller_renders_calibrated_latest_and_interval_values(qtbot: QtBot) 
         "pause_readbacks": False,
     }
     assert controller.ui.spinDmaGap.value() == pytest.approx(83.624)
-    controller._on_worker_finished()
+    controller._on_worker_finished(controller._worker_thread)
     qtbot.wait(60)
     assert not controller._display_timer.isActive()
     assert controller.status.text() == "Monitor stopped."

@@ -2223,16 +2223,16 @@ class MCAController(QWidget):
             self._worker.request_stop.emit()
 
     @Slot()
-    def _on_worker_finished(self) -> None:
-        thread = self._worker_thread
-        if thread is None:
-            return  # synchronous shutdown already reaped this worker
+    def _on_worker_finished(self, thread: QThread) -> None:
+        if thread is not self._worker_thread:
+            # Synchronous shutdown already reaped it, or polling restarted.
+            return
         if not thread.wait(2000):
             log.error(
                 "MCA ch%d: polling thread emitted finished but did not exit",
                 self._channel,
             )
-            QTimer.singleShot(100, self._on_worker_finished)
+            QTimer.singleShot(100, lambda: self._on_worker_finished(thread))
             return
 
         worker = self._worker

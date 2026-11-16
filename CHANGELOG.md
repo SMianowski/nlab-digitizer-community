@@ -194,6 +194,12 @@ silently delivering a misaligned block.
 - The MCA temperature coefficient written to the input filter is limited to
   -0.5 ... 0.49997 (raw -16384 ... 16383), the range the driver accepts since
   `d7b19a8` (F1): at 0.5 the filter gain is zero and beyond it the signal inverts.
+- Stopping and quickly restarting a background poller (Power Supply monitor, MCA
+  polling, Global diagnostics or temperature correction, external devices, Current
+  IIR monitor) no longer orphans the new one. The previous thread's queued
+  "finished" notice used to clear the new worker, so Stop could not stop it and it
+  was not joined at shutdown. Each owner now ignores a notice from a thread it has
+  already replaced.
 - Pressing Enter in a field no longer clicks a button in the Current Capture Analysis,
   Dose Calibration Logger, Timing Validation and Waveform Analysis windows (Qt's dialog
   default button had made Enter in a spin box press Open, Browse, Start CSV recording or

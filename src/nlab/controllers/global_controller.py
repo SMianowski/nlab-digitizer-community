@@ -381,7 +381,9 @@ class GlobalController(QWidget):
             error=True,
         )
 
-    def _on_temperature_finished(self) -> None:
+    def _on_temperature_finished(self, thread: QThread) -> None:
+        if thread is not self._temperature_worker_thread:
+            return  # an earlier worker; a restarted one is running
         self._temperature_worker = None
         self._temperature_worker_thread = None
         self._temperature_worker_stop_requested = False
@@ -789,7 +791,9 @@ class GlobalController(QWidget):
         self.ui.lblLastUpdate.setText(f"Read error: {message}")
         self.ui.lblLastUpdate.setStyleSheet("color: #b00020;")
 
-    def _on_diagnostics_finished(self) -> None:
+    def _on_diagnostics_finished(self, thread: QThread) -> None:
+        if thread is not self._worker_thread:
+            return  # an earlier worker; a restarted one is running
         self._worker = None
         self._worker_thread = None
         self._worker_stop_requested = False
