@@ -538,7 +538,7 @@ def test_vectorised_analysis_matches_per_window_reference_across_wrap():
     packets = [
         decode_sum_packet(packet(first=(MASK64 - 508 * 7 + 3 + i * 508 * 7) & MASK64,
                                  sequence=i, total=16 * (32768 + 13 * i)))
-        for i in range(3)
+        for i in range(20)  # 10160 points: the display ring wraps
     ]
     analysis = ScopeSumAnalysis()
     for item in packets:
@@ -553,9 +553,9 @@ def test_vectorised_analysis_matches_per_window_reference_across_wrap():
             points.append((elapsed * 8e-9, total / 16 - 32768.0))
             signed += total - 16 * 32768
     snapshot = analysis.snapshot()
-    assert list(snapshot["points"]) == points[-8192:]
+    assert snapshot["points"].tolist() == [list(point) for point in points[-8192:]]
     assert snapshot["signed_sum"] == signed
-    assert snapshot["windows"] == 3 * 508 and snapshot["skipped"] == 0
+    assert snapshot["windows"] == 20 * 508 and snapshot["skipped"] == 0
     assert packets[1].records[0][0] < packets[0].records[0][0]  # the wrap happened
 
 
@@ -574,7 +574,10 @@ def test_batch_analysis_equals_per_packet_analysis_and_keeps_error_prefix():
         reference.append(item)
     batched.append_many(packets[:7])
     batched.append_many(packets[7:])
-    assert batched.snapshot() == reference.snapshot()
+    left, right = batched.snapshot(), reference.snapshot()
+    # 30 x 508 points: both display rings have wrapped, at different offsets.
+    assert left.pop("points").tolist() == right.pop("points").tolist()
+    assert left == right
 
     gap = [decode_sum_packet(raw) for raw in _stream(5)]
     broken = gap[:3] + [gap[4]]  # sequence discontinuity at the fourth packet

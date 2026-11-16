@@ -120,6 +120,7 @@ class CurrentMonitorController(QWidget):
         self._display_hz = _DISPLAY_HZ
         self._display_period_ns = _DISPLAY_PERIOD_NS
         self._last_dma_render_generation = -1
+        self._last_sum_render_key: tuple[int, int, bool] | None = None
         self._last_dma_plot_points = 0
         self._last_dma_plot_update_ns = 0
         self._calibration_dirty = True
@@ -539,6 +540,7 @@ class CurrentMonitorController(QWidget):
         self._reset_measurement_state()
         self._normalize_dma_gap()
         normalize_numeric_control(self.ui.spinSumSamples)
+        self._last_sum_render_key = None
         try:
             self._sum_worker = scope_controller.start_current_sum_monitor(
                 frame_samples=self._sum_frame_samples(),
@@ -620,9 +622,15 @@ class CurrentMonitorController(QWidget):
             "Recorded window means" if worker.capture is None else "Window means"
         )
         snapshot = worker.analysis.snapshot()
-        points, mean = snapshot["points"], snapshot["mean"]
-        if points and mean is not None:
-            data = np.asarray(points)
+        # The reader process publishes at most ten snapshots a second; the
+        # display timer runs faster. Repainting an unchanged snapshot costs
+        # GUI CPU that, on a laptop, competes with that same reader process.
+        render_key = (id(worker), snapshot["packets"], worker.done)
+        if render_key == self._last_sum_render_key:
+            return
+        self._last_sum_render_key = render_key
+        data, mean = snapshot["points"], snapshot["mean"]
+        if data.size and mean is not None:
             connect = np.zeros(len(data), dtype=bool)
             # Adjacent accepted windows differ by one scheduled interval. Allow
             # float display rounding, but never bridge a missing native window.
@@ -630,8 +638,9 @@ class CurrentMonitorController(QWidget):
             self._curve.setData(
                 data[:, 0] - data[-1, 0], data[:, 1], stepMode=None, connect=connect
             )
-            self.ui.lblCurrent.setText(f"{self._format_value(points[-1][1])} ADC codes")
-            self.ui.lblRaw.setText(self._format_value(points[-1][1]))
+            latest = float(data[-1, 1])
+            self.ui.lblCurrent.setText(f"{self._format_value(latest)} ADC codes")
+            self.ui.lblRaw.setText(self._format_value(latest))
             self.ui.lblInterval.setText(f"{self._format_value(mean)} ADC codes (sample-weighted)")
             self.ui.lblAcquisition.setText(
                 f"{snapshot['windows']:,} windows; {snapshot['samples']:,} samples; "

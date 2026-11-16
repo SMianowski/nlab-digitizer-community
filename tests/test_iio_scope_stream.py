@@ -65,7 +65,7 @@ def _open_responses() -> bytes:
     return b"0.25.0\r\n0\r\n0\r\n0\r\n"
 
 
-def test_batched_stream_opens_four_blocks_and_reuses_one_readbuf(
+def test_batched_stream_opens_four_blocks_and_queues_one_readbuf_ahead(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first = bytes(range(16))
@@ -98,12 +98,38 @@ def test_batched_stream_opens_four_blocks_and_reuses_one_readbuf(
         b"SET iio:device15 BUFFERS_COUNT 4\r\n",
         b"OPEN iio:device15 8 00000001\r\n",
         b"READBUF iio:device15 32\r\n",
+        b"READBUF iio:device15 32\r\n",
     ]
     assert fake.options == [(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)]
 
     stream.close()
     assert fake.shutdown_calls == [socket.SHUT_RDWR]
     assert fake.closed
+
+
+def test_queued_readbuf_keeps_one_request_ahead_across_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Each READBUF reply carries its own scan-mask line before its first
+    # frame; the queued request's reply follows the previous one in order.
+    frames = [bytes([i]) * 16 for i in range(5)]
+    replies = (
+        b"16\r\n00000001\r\n" + frames[0] + b"16\r\n" + frames[1]
+        + b"16\r\n00000001\r\n" + frames[2] + b"16\r\n" + frames[3]
+        + b"16\r\n00000001\r\n" + frames[4]
+    )
+    fake = _FakeSocket(_open_responses() + replies)
+    _patch_connection(monkeypatch, fake)
+    stream = IiodScopeStream("ip:board", "iio:device9", samples=8, batch_frames=2)
+
+    queued = []
+    for frame in frames:
+        assert stream.refill() == 16
+        assert stream.read() == frame
+        queued.append(sum(cmd.startswith(b"READBUF") for cmd in fake.sent))
+    # Two requests before the first frame; one more as each batch is entered.
+    assert queued == [2, 2, 3, 3, 4]
+    assert list(stream.requests) == [1, 2]
 
 
 def test_batch_preserves_complete_prefix_before_server_timeout(
@@ -448,8 +474,10 @@ def test_sum_capture_retains_batched_tail_and_only_server_timeout_completes(
         else:
             assert "runtime_metadata_json" not in source.attrs
     requests = [cmd for cmd in fake.sent if cmd.startswith(b"READBUF")]
-    assert len(requests) == (2 if batch_frames == 2 else 1)
-    assert requests[0] == f"READBUF iio:device13 {4096 * batch_frames}\r\n".encode()
+    # One request is always queued behind the one being read: x2 batches need
+    # a third request once the first ends; one x64 batch covers the session.
+    assert len(requests) == (3 if batch_frames == 2 else 2)
+    assert set(requests) == {f"READBUF iio:device13 {4096 * batch_frames}\r\n".encode()}
     assert fake.sent[3] == b"OPEN iio:device13 2048 00000001\r\n"
     sent = len(fake.sent)
     with pytest.raises(OSError) as caught:

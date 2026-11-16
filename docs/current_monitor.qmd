@@ -61,7 +61,9 @@ File creation, data writes, and final flush run on a background writer.
 saving. Acquisition controls stay locked until the recording is closed.
 
 The sum monitor reports all-sample window means in ADC codes, sample-weighted
-session means, exposure, and missed windows. Its aggregate data cannot supply
+session means, exposure, and missed windows. Expect a few missed windows even on an
+idle system: at gap 0 the IP skips one window while sealing each 508-window packet,
+so 256-sample windows reach about 99.8% coverage (measured live on IP124). Its aggregate data cannot supply
 pulse waveforms, extrema, or noise spectra. The IIR/waveform calibration controls
 do not apply to this view; physical current conversion requires a qualified
 channel/DC-path calibration.

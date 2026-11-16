@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- Current periodic sums lost windows while the Current plot was on screen. Live on
+  .128 (IP124, 256-sample windows, gap 0) the shown GUI path covered 87.7–93% of the
+  time; it now covers 99.7–99.8%, the same as a bare script. The remaining 0.2% is
+  one window per 508-window packet, which the IP skips while sealing a packet
+  (PetaLinux `scope-periodic-sum-v123.md`). Every stall had fallen at a 64-frame
+  READBUF boundary: there iiod stops draining the four-block kernel queue (~1 ms of
+  sums) until the next request arrives, and a reader process starved of CPU arrived
+  late. Three changes:
+  - The live sum plot repaints only when a new snapshot has arrived (at most ten a
+    second) instead of on every display tick; the GUI process fell from about one
+    full core to about half of one.
+  - Sum snapshots carry the 8192 display points as one NumPy array instead of a tuple
+    of tuples: the reader process pickles a snapshot in 0.09 ms instead of 1.2 ms
+    while holding its interpreter lock, and its per-packet analysis takes 31 instead
+    of 54 µs.
+  - Remote Scope DMA (waveforms, Current DMA and sums) keeps one READBUF queued
+    behind the batch being read, so iiod starts the next batch at once. With the
+    GUI fixes in place this cut boundary stalls from 24–34 to 1–3 per 14 s run.
+    STOP drain, tail delivery, carry-over discard and sum completion were rechecked
+    live with it.
+- The first periodic-sum capture after a connect or after waveform DMA is no longer
+  abnormal (rechecked live on 0.9.0 in 15 fresh-connect sessions): frames left in the
+  core by an undrained close are now discarded before START instead of failing as
+  `Unknown periodic-sum magic/ABI`.
+
 ## [0.9.0] — 2026-11-16
 
 Includes the client-side rules from the PetaLinux driver review of 2026-11-14/15

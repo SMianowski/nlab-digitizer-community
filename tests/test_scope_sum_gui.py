@@ -326,6 +326,31 @@ def test_sums_use_existing_current_plot_and_restore_scope_after_stop(qtbot, monk
         _close(device, scope, current)
 
 
+def test_sum_display_repaints_only_when_a_new_snapshot_arrives(qtbot, monkeypatch):
+    # The display timer runs faster than the reader process publishes; on a
+    # laptop, repainting unchanged snapshots starved the reader (live .128).
+    device, scope, current, capture = _views(qtbot, monkeypatch)
+    try:
+        current.start_monitor()
+        assert capture.entered.wait(1)
+        qtbot.waitUntil(lambda: current._curve.yData is not None)
+        set_data = Mock(wraps=current._curve.setData)
+        monkeypatch.setattr(current._curve, "setData", set_data)
+        for _ in range(3):
+            current._render_pending()
+        set_data.assert_not_called()
+
+        newer = capture.analysis.snapshot()
+        newer["packets"] += 1
+        monkeypatch.setattr(capture.analysis, "snapshot", lambda: dict(newer))
+        current._render_pending()
+        current._render_pending()
+        assert set_data.call_count == 1
+        assert isinstance(newer["points"], np.ndarray) and newer["points"].shape == (1, 2)
+    finally:
+        _close(device, scope, current)
+
+
 @pytest.mark.parametrize("scope_first", [False, True])
 def test_shutdown_joins_before_restoring_and_is_idempotent(qtbot, monkeypatch, scope_first):
     device, scope, current, capture = _views(qtbot, monkeypatch)

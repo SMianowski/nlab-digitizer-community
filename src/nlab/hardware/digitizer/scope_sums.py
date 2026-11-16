@@ -12,27 +12,32 @@ import logging
 import struct
 import threading
 import time
-from collections import deque
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cached_property
 from pathlib import Path
 from queue import Empty, Full, Queue
-from typing import TYPE_CHECKING, NotRequired, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypedDict, cast
 
 import h5py
 import numpy as np
+import numpy.typing as npt
 
 if TYPE_CHECKING:
     from nlab.hardware.digitizer.reader_process import ReaderSession
 
 MASK64 = (1 << 64) - 1
 MAGICS = {0x31534D5553504456: 123, 0x32534D5553504456: 124}
+# Newest windows kept for the live plot (about 16 packets).
+_DISPLAY_POINTS = 8192
 
 
 class ScopeSumSnapshot(TypedDict):
-    points: tuple[tuple[float, float], ...]
+    # Newest display windows, oldest first: shape (n, 2) float64 of
+    # (elapsed seconds, mean offset ADC code). An array, not tuples, so the
+    # reader process pickles it cheaply and the GUI plots it without copying.
+    points: npt.NDArray[np.float64]
     packets: int
     windows: int
     samples: int
@@ -504,7 +509,10 @@ class ScopeSumAnalysis:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._points: deque[tuple[float, float]] = deque(maxlen=8192)
+        # Ring of the newest display points; _point_total counts every point
+        # ever written, so its remainder is the next write position.
+        self._points = np.empty((_DISPLAY_POINTS, 2), dtype=np.float64)
+        self._point_total = 0
         self._last_timestamp: int | None = None
         self._elapsed_ticks = 0
         self.packet_count = self.window_count = self.sample_count = self.signed_sum = 0
@@ -560,11 +568,9 @@ class ScopeSumAnalysis:
         elapsed = self._elapsed_ticks + np.cumsum(steps.astype(np.int64))
         self._elapsed_ticks = int(elapsed[-1])
         self._last_timestamp = int(timestamps[-1])
-        # Only the newest maxlen points survive the bounded display history.
-        tail = slice(-self._points.maxlen, None) if self._points.maxlen else slice(None)
-        self._points.extend(zip(
-            (elapsed[tail] * 8e-9).tolist(), (sums[tail] / n - 32768.0).tolist(), strict=True,
-        ))
+        # Only the newest _DISPLAY_POINTS survive the bounded display history.
+        tail = slice(-_DISPLAY_POINTS, None)
+        self._write_points(elapsed[tail] * 8e-9, sums[tail] / n - 32768.0)
         self.signed_sum += int(sums.sum(dtype=np.uint64)) - n * 32768 * count
         self.packet_count += len(packets)
         self.window_count += count
@@ -572,13 +578,32 @@ class ScopeSumAnalysis:
         self.coverage_ns += n * 2 * count
         self.missed_windows = packets[-1].missed_windows
 
+    def _write_points(
+        self, seconds: npt.NDArray[np.floating[Any]], means: npt.NDArray[np.floating[Any]],
+    ) -> None:
+        count = seconds.size  # at most _DISPLAY_POINTS
+        start = self._point_total % _DISPLAY_POINTS
+        first = min(count, _DISPLAY_POINTS - start)
+        self._points[start:start + first, 0] = seconds[:first]
+        self._points[start:start + first, 1] = means[:first]
+        self._points[:count - first, 0] = seconds[first:]
+        self._points[:count - first, 1] = means[first:]
+        self._point_total += count
+
+    def _display_points(self) -> npt.NDArray[np.float64]:
+        """A copy of the ring, oldest point first."""
+        if self._point_total <= _DISPLAY_POINTS:
+            return self._points[:self._point_total].copy()
+        start = self._point_total % _DISPLAY_POINTS
+        return np.concatenate((self._points[start:], self._points[:start]))
+
     def snapshot(self) -> ScopeSumSnapshot:
         with self._lock:
             if self._mirror is not None:
                 mirrored: ScopeSumSnapshot = self._mirror.copy()
                 return mirrored
             result: ScopeSumSnapshot = dict(
-                points=tuple(self._points),
+                points=self._display_points(),
                 packets=self.packet_count,
                 windows=self.window_count,
                 samples=self.sample_count,

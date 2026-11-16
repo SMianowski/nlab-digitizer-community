@@ -106,6 +106,11 @@ Additional rules:
   before the session's START record (zero payload, timestamp 1) and fails continuity
   when START is not record 0. `list_deadtime_raw` survives arm/START (L2): judge loss
   against the value read before arm.
+- Remote Scope DMA (`iio_scope_stream.py`) keeps one READBUF queued behind the batch
+  being read. At a batch boundary iiod stops draining the four-block kernel queue
+  until the next request arrives; do not return to request-after-batch. Keep the
+  live sum display from repainting unchanged snapshots: GUI CPU starves the reader
+  process on laptops and shows up as missed windows at those boundaries.
 - Current MCA list mode transports one unchanged 16 KiB frame containing 1024 opaque
   16-byte records. Keep the IIO record layout distinct from the same-sized legacy NDMA
   v1 event record and preserve the NDMA version distinction.

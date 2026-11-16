@@ -10,6 +10,15 @@ This protocol client follows the reference implementation shipped with the
 authoritative PetaLinux tree.  It returns complete prefix frames one at a time;
 an error later in a batch is raised on the corresponding refill and permanently
 faults the stream.
+
+Unlike the reference, it keeps one ``READBUF`` queued behind the batch being
+read.  iiod 0.25 executes one client's commands in order, so the queued
+request starts as soon as the previous one completes.  Without it, iiod stops
+draining the four-block kernel queue (about 1 ms of 256-sample sums) at every
+batch boundary until the client's next request arrives; live on .128 IP124
+(256 samples, gap 0) that boundary was where every missed-window stall fell.
+Replies stay strictly ordered, and an error ends the stream before the queued
+request is read; closing the socket ends that request on the target.
 """
 
 from __future__ import annotations
@@ -17,6 +26,7 @@ from __future__ import annotations
 import errno
 import re
 import socket
+from collections import deque
 from typing import BinaryIO
 
 
@@ -51,8 +61,10 @@ class IiodScopeStream:
         self.device = device
         self.frame_bytes = samples * 2
         self.batch_frames = batch_frames
-        self.remaining = 0
-        self.first_chunk = False
+        # Frames still owed by each sent READBUF, oldest first. One request
+        # is kept queued behind the one being read so iiod starts the next
+        # batch at once instead of waiting a client round trip per batch.
+        self.requests: deque[int] = deque()
         self.failed = False
         # Set by cancel() on a healthy stream. Socket errors after a deliberate
         # cancel are platform-specific (Windows WSAECONNABORTED 10053, Linux
@@ -112,13 +124,9 @@ class IiodScopeStream:
             raise OSError(errno.ECANCELED, "iiod stream was cancelled")
         self.payload = None
         try:
-            if not self.remaining:
-                self.remaining = self.batch_frames
-                self.first_chunk = True
-                request_bytes = self.frame_bytes * self.remaining
-                self.sock.sendall(
-                    f"READBUF {self.device} {request_bytes}\r\n".encode("ascii")
-                )
+            while len(self.requests) < 2:
+                self._request()
+            first_chunk = self.requests[0] == self.batch_frames
             size = self._integer()
             if size < 0:
                 self.server_timed_out = size == -110  # Target Linux errno, also on Windows.
@@ -128,16 +136,17 @@ class IiodScopeStream:
                 )
             if size != self.frame_bytes:
                 raise OSError(errno.EPROTO, f"short/misaligned batch chunk: {size}")
-            if self.first_chunk and self._line() != b"00000001":
+            if first_chunk and self._line() != b"00000001":
                 raise OSError(errno.EPROTO, "unexpected scan mask")
-            self.first_chunk = False
             if self.input is None:
                 raise OSError(errno.EPIPE, "iiod stream is closed")
             payload = self.input.read(size)
             if len(payload) != size:
                 raise OSError(errno.EPROTO, "connection ended within a frame")
             self.payload = payload
-            self.remaining -= 1
+            self.requests[0] -= 1
+            if not self.requests[0]:
+                self.requests.popleft()
             return size
         except BaseException:
             self.failed = True
@@ -146,6 +155,12 @@ class IiodScopeStream:
                 # interrupted this read carries no information.
                 raise OSError(errno.ECANCELED, "iiod stream was cancelled") from None
             raise
+
+    def _request(self) -> None:
+        self.sock.sendall(
+            f"READBUF {self.device} {self.frame_bytes * self.batch_frames}\r\n".encode("ascii")
+        )
+        self.requests.append(self.batch_frames)
 
     def read(self) -> bytes:
         """Return the payload from the most recent successful refill."""

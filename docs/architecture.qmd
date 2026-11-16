@@ -60,8 +60,11 @@ recreating buffers mid-file.
 
 Current firmware can advertise four queued Scope kernel blocks. Qualified
 remote capture uses READBUF batches of 64 frames to amortize network round
-trips while preserving exact hardware frame boundaries. Firmware without the
-queue capability remains on the conservative one-block path.
+trips while preserving exact hardware frame boundaries. One request is always
+queued behind the batch being read: iiod executes a client's commands in order,
+so it starts the next batch without waiting a round trip, during which the four
+kernel blocks (about 1 ms of 256-sample sums) would otherwise overflow. Firmware
+without the queue capability remains on the conservative one-block path.
 
 ## MCA DMA lifecycle
 
