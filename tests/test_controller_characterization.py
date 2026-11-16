@@ -8,6 +8,7 @@ unchanged through extractions and renames of private members.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -194,10 +195,19 @@ def test_psu_monitor_reads_back_until_stopped(qtbot: QtBot) -> None:
         controller.ui.btnStartMonitor.click()
         qtbot.waitUntil(lambda: len(readbacks) >= 2, timeout=5000)
         controller.ui.btnStopMonitor.click()
-        qtbot.waitUntil(lambda: controller.ui.btnStartMonitor.isEnabled(), timeout=5000)
-        settled = len(readbacks)
-        qtbot.wait(300)
-        assert len(readbacks) <= settled + 1
+        assert controller.ui.btnStartMonitor.isEnabled()
+        # Readbacks polled before Stop can still be queued for the GUI thread:
+        # in the CI container a ~280 ms GUI stall delayed the click itself, and
+        # three readbacks polled before it were delivered after it. The worker
+        # must still go quiet; one that kept polling every 100 ms never would.
+        deadline = time.monotonic() + 5
+        while True:
+            before = len(readbacks)
+            qtbot.wait(300)
+            if len(readbacks) == before:
+                break
+            assert time.monotonic() < deadline, "PSU readbacks continued after Stop"
+        assert controller.ui.btnStartMonitor.isEnabled()
     finally:
         controller.stop_monitor_sync()
 
