@@ -10,7 +10,7 @@ from typing import Literal, cast
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QObject, QSettings, Qt, QThread, QTimer, Slot
+from PySide6.QtCore import QEvent, QObject, QSettings, Qt, QThread, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -70,6 +70,7 @@ from nlab.workers.waveform_average_worker import WaveformAverage, WaveformAverag
 from nlab.workers.waveform_file_worker import WaveformFileIndexWorker
 from nlab.workers.waveform_fom_optimization_worker import WaveformFomOptimizationWorker
 from nlab.workers.waveform_psd_worker import WaveformPsdWorker
+from nlab.workers.worker_thread import retire_thread_when_finished
 
 log = logging.getLogger(__name__)
 _MAX_QT_INDEX = 2_147_483_647
@@ -708,7 +709,7 @@ class WaveformAnalysisDialog(QDialog):
         worker.loaded.connect(self._index_loaded, Qt.ConnectionType.QueuedConnection)
         worker.cancelled.connect(self._index_cancelled, Qt.ConnectionType.QueuedConnection)
         worker.error.connect(self._index_failed, Qt.ConnectionType.QueuedConnection)
-        worker.finished.connect(self._finish_worker, Qt.ConnectionType.QueuedConnection)
+        retire_thread_when_finished(self, worker, thread)
         # The owning thread handles deferred worker deletion during retirement.
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(
@@ -722,20 +723,6 @@ class WaveformAnalysisDialog(QDialog):
         self.progress.setValue(0)
         QSettings().setValue(settings_keys.ANALYSIS_WAVEFORM_FOLDER, str(path.parent))
         thread.start()
-
-    @Slot()
-    def _finish_worker(self) -> None:
-        worker = self.sender()
-        if worker is None:
-            return  # A synchronous stop already joined and deleted this worker.
-        thread = worker.thread()
-        if thread is None or thread is self.thread():
-            return
-        # Retire a worker in one GUI turn. The wait releases the GIL while Qt
-        # destroys the worker, so GUI text updates cannot deadlock against its
-        # connection cleanup (observed on Windows with PySide6 6.9.3).
-        thread.quit()
-        thread.wait()
 
     def _index_progress(self, processed: int, total: int) -> None:
         self.progress.setValue(round(1000 * processed / total) if total else 0)
@@ -870,7 +857,7 @@ class WaveformAnalysisDialog(QDialog):
         thread.started.connect(worker.run, Qt.ConnectionType.DirectConnection)
         worker.loaded.connect(self._average_loaded, Qt.ConnectionType.QueuedConnection)
         worker.error.connect(self._average_failed, Qt.ConnectionType.QueuedConnection)
-        worker.finished.connect(self._finish_worker, Qt.ConnectionType.QueuedConnection)
+        retire_thread_when_finished(self, worker, thread)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(self._average_thread_finished, Qt.ConnectionType.QueuedConnection)
         self._average_frames = frames
@@ -1211,7 +1198,7 @@ class WaveformAnalysisDialog(QDialog):
         worker.loaded.connect(self._optimization_loaded, Qt.ConnectionType.QueuedConnection)
         worker.cancelled.connect(self._optimization_cancelled, Qt.ConnectionType.QueuedConnection)
         worker.error.connect(self._optimization_failed, Qt.ConnectionType.QueuedConnection)
-        worker.finished.connect(self._finish_worker, Qt.ConnectionType.QueuedConnection)
+        retire_thread_when_finished(self, worker, thread)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(
             self._optimization_thread_finished,
@@ -1362,7 +1349,7 @@ class WaveformAnalysisDialog(QDialog):
         worker.loaded.connect(self._analysis_result_ready, Qt.ConnectionType.QueuedConnection)
         worker.cancelled.connect(self._analysis_cancel_ready, Qt.ConnectionType.QueuedConnection)
         worker.error.connect(self._analysis_error_ready, Qt.ConnectionType.QueuedConnection)
-        worker.finished.connect(self._finish_worker, Qt.ConnectionType.QueuedConnection)
+        retire_thread_when_finished(self, worker, thread)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(
             self._analysis_thread_finished,

@@ -424,6 +424,31 @@ def test_waveform_worker_is_deleted_by_its_finished_thread(
     assert finish_threads == [dialog.thread()]
 
 
+def test_worker_threads_retire_without_relying_on_qt_sender(
+    tmp_path: Path, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On GitHub's Linux runners the queued finish slot sometimes got None from
+    # QObject.sender(): the index thread then never quit and the dialog waited
+    # forever (the CI stack dump showed no live worker thread). Each thread
+    # must be retired from what was bound at wiring time.
+    path = tmp_path / "sender-free.bin"
+    samples = np.asarray((100, 100, 100, 90, 60, 70, 90, 100), dtype="<i2")
+    path.write_bytes(
+        FILE_HEADER_STRUCT.pack(FILE_MAGIC, FILE_VERSION, 0, 0, 0.0, 12)
+        + struct.pack("<Q", 1) + samples.tobytes()
+    )
+    monkeypatch.setattr(WaveformAnalysisDialog, "sender", lambda _self: None)
+    dialog = WaveformAnalysisDialog()
+    qtbot.addWidget(dialog)
+    dialog.open_path(path)
+    qtbot.waitUntil(lambda: dialog._index_thread is None, timeout=5000)
+    assert dialog._index is not None
+
+    dialog._start_analysis()
+    assert dialog._analysis_thread is not None
+    qtbot.waitUntil(lambda: dialog._analysis_thread is None, timeout=5000)
+
+
 @pytest.mark.parametrize(
     "outcome,action",
     [("loaded", "display"), ("failed", "display"), ("cancelled", "display"),

@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The sum recorder batches up to 64 packets (was 16) behind a 2048-packet queue
   (was 256). HDF5 recording at 192-sample windows now covers 99.0–99.75%.
 
+### Fixed
+
+- Waveform Analysis could stay busy forever after opening a file or running an
+  analysis (intermittent on GitHub's Linux runners, where tests timed out waiting for
+  the index thread). Its finish handler identified the worker through
+  `QObject.sender()`, which sometimes returned None, so the worker's thread never
+  quit; a thread-stack dump from CI showed no live worker thread. Each worker's
+  thread is now bound when it is wired (`retire_thread_when_finished` in
+  `nlab/workers/worker_thread.py`) and quit and joined on the GUI thread as before.
 - Current periodic sums lost windows while the Current plot was on screen. Live on
   .128 (IP124, 256-sample windows, gap 0) the shown GUI path covered 87.7–93% of the
   time; it now covers 99.7–99.8%, the same as a bare script. The remaining 0.2% is

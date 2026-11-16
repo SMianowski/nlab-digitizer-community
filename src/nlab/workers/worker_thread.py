@@ -62,6 +62,38 @@ class _FinishedRelay(QObject):
             self.deleteLater()
 
 
+class _ThreadRetirer(QObject):
+    """Quits and joins one worker's thread, on the owner's thread, once it finishes."""
+
+    def __init__(self, owner: QObject, thread: QThread) -> None:
+        super().__init__(owner)
+        self._thread = thread
+
+    @Slot()
+    def retire(self) -> None:
+        try:
+            # The wait releases the GIL while Qt destroys the worker, so GUI
+            # text updates cannot deadlock against its connection cleanup.
+            self._thread.quit()
+            self._thread.wait()
+        except RuntimeError:
+            pass  # A synchronous stop already joined and deleted the thread.
+        finally:
+            self.deleteLater()
+
+
+def retire_thread_when_finished(owner: QObject, worker: BaseWorker, thread: QThread) -> None:
+    """Quit and join *thread* in one owner-thread turn after *worker* finishes.
+
+    Binds the thread when wiring instead of asking ``QObject.sender()`` in the
+    slot. A slot that looked its worker up through ``sender()`` sometimes got
+    None on GitHub's Linux runners: the thread then never quit and its owner
+    waited forever (a Python stack dump showed no live worker thread).
+    """
+    retirer = _ThreadRetirer(owner, thread)
+    worker.finished.connect(retirer.retire, Qt.ConnectionType.QueuedConnection)
+
+
 def create_worker_thread(
     owner: QObject,
     worker: BaseWorker,
