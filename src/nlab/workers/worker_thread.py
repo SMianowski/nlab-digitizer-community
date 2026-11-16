@@ -7,6 +7,9 @@ shutdown policy:
 * ``finished -> thread.quit`` is a direct connection: owners wait for the
   thread on the GUI thread, where the QThread object lives, and a queued
   quit() would sit behind that wait for the whole timeout.
+* The owner's *on_finished* callback runs only after the thread has fully
+  exited, including the deferred delete of its worker, so the owner can drop
+  its references without racing that deletion.
 * The owner's *on_finished* callback receives the thread that finished. It
   is queued, so it can run after the owner has already started a replacement
   worker (Stop then Start, or a synchronous stop followed by a restart); the
@@ -43,6 +46,16 @@ class _FinishedRelay(QObject):
 
     @Slot()
     def fire(self) -> None:
+        # ``finished`` is emitted before the exiting thread runs its deferred
+        # deletes, which destroy the worker there. Owners drop their last
+        # Python reference in the callback, and PySide then deletes that same
+        # Python-created worker on this thread: two threads deleting one
+        # object (an intermittent segfault, seen on Linux). Wait until the
+        # thread has fully finished first; it already emitted ``finished``.
+        try:
+            self._thread.wait()
+        except RuntimeError:
+            pass  # the QThread itself was already deleted
         try:
             self._callback(self._thread)
         finally:

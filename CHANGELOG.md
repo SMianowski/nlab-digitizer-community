@@ -200,6 +200,11 @@ silently delivering a misaligned block.
   "finished" notice used to clear the new worker, so Stop could not stop it and it
   was not joined at shutdown. Each owner now ignores a notice from a thread it has
   already replaced.
+- Stopping a background poller could crash the application (segmentation fault,
+  intermittent, reproduced on Linux): the exiting thread deleted its worker while
+  the GUI thread dropped the last Python reference and PySide deleted the same
+  object. The owner's finished handler now runs only after the thread has fully
+  exited.
 - Pressing Enter in a field no longer clicks a button in the Current Capture Analysis,
   Dose Calibration Logger, Timing Validation and Waveform Analysis windows (Qt's dialog
   default button had made Enter in a spin box press Open, Browse, Start CSV recording or
