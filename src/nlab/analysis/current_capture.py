@@ -1,7 +1,9 @@
-"""Lazy, hardware-independent browsing of measured periodic-sum HDF5 files.
+"""Lazy, hardware-independent browsing of measured periodic-sum recordings.
 
-Statistics describe window means, not unrecorded ADC samples. Only packets in
-the requested view (plus their neighbors) are validated, not the entire file.
+Reads both containers: HDF5 (raw packets plus decoded columns) and NSUM
+binary (raw packets only, ``scope_sum_file``). Statistics describe window
+means, not unrecorded ADC samples. Only packets in the requested view (plus
+their neighbors) are validated, not the entire file.
 """
 
 from __future__ import annotations
@@ -9,14 +11,16 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Protocol
 
 import h5py
 import numpy as np
 import numpy.typing as npt
 
+from nlab.hardware.digitizer import scope_sum_file as sum_file
 from nlab.hardware.digitizer.scope_sums import (
     MASK64,
     ScopeSumContinuity,
@@ -53,6 +57,7 @@ class CurrentCaptureInfo:
     geometry: ScopeSumGeometry | None
     first_timestamp: int
     duration_ticks: int
+    container: str = "hdf5"  # or "nsum"
 
     @property
     def windows(self) -> int:
@@ -99,15 +104,159 @@ def _json_attribute(source: h5py.File, name: str) -> dict[str, Any]:
     return value
 
 
-def _packet(source: h5py.File, index: int, offsets: npt.NDArray[np.uint64]) -> ScopeSumPacket:
-    packet = decode_sum_packet(source["packets"][index].tobytes())
+class _Source(Protocol):
+    def packets(self, start: int, stop: int) -> npt.NDArray[np.uint8]: ...
+    def stored(self, name: str, begin: int, end: int) -> npt.NDArray[np.uint64] | None: ...
+    def timestamp(self, info: CurrentCaptureInfo, window: int) -> int: ...
+    def close(self) -> None: ...
+
+
+class _Hdf5Source:
+    """Raw packets plus the decoded columns stored beside them."""
+
+    def __init__(self, path: Path | h5py.File) -> None:
+        # Wrap an already-open file without taking ownership of it.
+        self._owned = not isinstance(path, h5py.File)
+        self._file: h5py.File = path if isinstance(path, h5py.File) else h5py.File(path, "r")
+
+    def packets(self, start: int, stop: int) -> npt.NDArray[np.uint8]:
+        return np.asarray(self._file["packets"][start:stop], dtype=np.uint8)
+
+    def stored(self, name: str, begin: int, end: int) -> npt.NDArray[np.uint64] | None:
+        return np.asarray(self._file[name][begin:end], dtype=np.uint64)
+
+    def timestamp(self, info: CurrentCaptureInfo, window: int) -> int:
+        return int(self._file["timestamps"][window])
+
+    def close(self) -> None:
+        if self._owned:
+            self._file.close()
+
+
+class _BinarySource:
+    """NSUM raw packets; window timestamps come from decoding their packet."""
+
+    def __init__(self, path: Path) -> None:
+        self._layout = sum_file.read_layout(path)
+        self._handle: BinaryIO = path.open("rb")
+        self._decoded: tuple[int, ScopeSumPacket] | None = None
+
+    def packets(self, start: int, stop: int) -> npt.NDArray[np.uint8]:
+        data = sum_file.read_packet_bytes(self._handle, self._layout, start, stop)
+        return np.frombuffer(data, dtype=np.uint8).reshape(-1, sum_file.PACKET_BYTES)
+
+    def stored(self, name: str, begin: int, end: int) -> npt.NDArray[np.uint64] | None:
+        return None  # Only the raw packets are stored.
+
+    def timestamp(self, info: CurrentCaptureInfo, window: int) -> int:
+        index = int(np.searchsorted(info.offsets, window, side="right")) - 1
+        if self._decoded is None or self._decoded[0] != index:
+            raw = self.packets(index, index + 1)[0].tobytes()
+            self._decoded = (index, decode_sum_packet(raw, info.geometry))
+        return int(self._decoded[1].timestamps[window - int(info.offsets[index])])
+
+    def close(self) -> None:
+        self._handle.close()
+
+
+@contextmanager
+def _open_source(info: CurrentCaptureInfo) -> Iterator[_Source]:
+    source: _Source = (
+        _BinarySource(info.path) if info.container == "nsum" else _Hdf5Source(info.path)
+    )
+    try:
+        yield source
+    finally:
+        source.close()
+
+
+def _packet(source: _Source, index: int, offsets: npt.NDArray[np.uint64]) -> ScopeSumPacket:
+    packet = decode_sum_packet(source.packets(index, index + 1)[0].tobytes())
     start, end = int(offsets[index]), int(offsets[index + 1])
     if end - start != packet.timestamps.size:
         raise ValueError("Stored valid_count differs from raw packet")
     for name, expected in (("timestamps", packet.timestamps), ("sums", packet.sums)):
-        if not np.array_equal(source[name][start:end], expected):
+        stored = source.stored(name, start, end)
+        if stored is not None and not np.array_equal(stored, expected):
             raise ValueError(f"Stored {name} differs from raw packet")
     return packet
+
+
+def _span(
+    first: ScopeSumPacket, last: ScopeSumPacket,
+) -> tuple[ScopeSumGeometry, int, int]:
+    geometry = ScopeSumGeometry(first.samples_per_window, first.ip_version, first.gap_cycles)
+    if (last.samples_per_window, last.ip_version, last.gap_cycles) != (
+        geometry.frame_samples,
+        geometry.ip_version,
+        geometry.gap_cycles,
+    ):
+        raise ValueError("Sum geometry changed during acquisition")
+    first_stamp = int(first.timestamps[0])
+    duration_ticks = (int(last.timestamps[-1]) - first_stamp) & MASK64
+    if duration_ticks >= 1 << 63:
+        raise ValueError("Nonmonotonic or ambiguous capture timestamp span")
+    return geometry, first_stamp, duration_ticks + geometry.frame_samples // 4
+
+
+def _binary_capture_info(
+    path: Path, fingerprint: tuple[int, int], cancelled: Callable[[], bool],
+) -> CurrentCaptureInfo:
+    layout = sum_file.read_layout(path)
+    header = layout.header
+    if (header.get("format"), header.get("format_version")) != ("nlab-scope-sums", 1):
+        raise ValueError("Choose an nlab-scope-sums version 1 capture")
+    metadata = header.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise ValueError("NSUM metadata must contain a mapping")
+    trailer = layout.trailer
+    if trailer is None:
+        cleanup_error = "Recording did not close; packets up to the last whole block are shown"
+        if layout.ignored_bytes:
+            cleanup_error += f" ({layout.ignored_bytes} trailing bytes ignored)"
+        runtime: Any = {}
+    else:
+        cleanup_error = str(trailer.get("cleanup_error", ""))
+        runtime = trailer.get("runtime_metadata") or {}
+        if not isinstance(runtime, dict):
+            raise ValueError("runtime_metadata must contain a mapping")
+    _check_cancelled(cancelled)
+    counts = np.zeros(layout.packets, dtype=np.uint64)
+    geometry, first_stamp, duration_ticks = None, 0, 0
+    if layout.packets:
+        source = _BinarySource(path)
+        try:
+            first = decode_sum_packet(source.packets(0, 1)[0].tobytes())
+            last = decode_sum_packet(
+                source.packets(layout.packets - 1, layout.packets)[0].tobytes()
+            )
+        finally:
+            source.close()
+        # The producer seals every packet full except a final STOP flush
+        # (scope-periodic-sum-v123.md). A partial packet elsewhere fails decode
+        # when viewed, like any other invalid packet.
+        capacity = 508 if first.ip_version == 124 else 254
+        if layout.packets > 1 and first.timestamps.size != capacity:
+            raise ValueError("First sum packet is partial but not the last packet")
+        counts[:] = capacity
+        counts[-1] = last.timestamps.size
+        geometry, first_stamp, duration_ticks = _span(first, last)
+    offsets = np.concatenate((np.zeros(1, dtype=np.uint64), np.cumsum(counts, dtype=np.uint64)))
+    return CurrentCaptureInfo(
+        path,
+        fingerprint,
+        metadata,
+        runtime,
+        str(header.get("configuration_yaml", "") or ""),
+        bool(trailer is not None and trailer.get("complete", False)),
+        cleanup_error,
+        int(trailer.get("final_missed_windows", 0)) if trailer is not None else 0,
+        offsets,
+        geometry,
+        first_stamp,
+        duration_ticks,
+        "nsum",
+    )
 
 
 def read_current_capture_info(
@@ -117,6 +266,12 @@ def read_current_capture_info(
 ) -> CurrentCaptureInfo:
     path = Path(path)
     fingerprint = _fingerprint(path)
+    if sum_file.is_binary_sum_file(path):
+        info = _binary_capture_info(path, fingerprint, cancelled)
+        _check_cancelled(cancelled)
+        if _fingerprint(path) != fingerprint:
+            raise ValueError("Capture changed while opening; stop recording before browsing")
+        return info
     with h5py.File(path, "r") as source:
         if (source.attrs.get("format"), source.attrs.get("format_version")) != (
             "nlab-scope-sums",
@@ -144,26 +299,13 @@ def read_current_capture_info(
         offsets = np.concatenate((np.zeros(1, dtype=np.uint64), np.cumsum(counts, dtype=np.uint64)))
         if len(source["timestamps"]) != int(offsets[-1]) or len(source["sums"]) != offsets[-1]:
             raise ValueError("Trailing or truncated sum record columns")
-        geometry, first_stamp, duration_ticks = None, 0, 0
+        geometry: ScopeSumGeometry | None = None
+        first_stamp, duration_ticks = 0, 0
         if len(counts):
-            first = _packet(source, 0, offsets)
-            last = _packet(source, len(counts) - 1, offsets)
-            geometry = ScopeSumGeometry(
-                first.samples_per_window,
-                first.ip_version,
-                first.gap_cycles,
-            )
-            if (last.samples_per_window, last.ip_version, last.gap_cycles) != (
-                geometry.frame_samples,
-                geometry.ip_version,
-                geometry.gap_cycles,
-            ):
-                raise ValueError("Sum geometry changed during acquisition")
-            first_stamp = int(first.timestamps[0])
-            duration_ticks = (int(last.timestamps[-1]) - first_stamp) & MASK64
-            if duration_ticks >= 1 << 63:
-                raise ValueError("Nonmonotonic or ambiguous capture timestamp span")
-            duration_ticks += geometry.frame_samples // 4
+            packets = _Hdf5Source(source)
+            first = _packet(packets, 0, offsets)
+            last = _packet(packets, len(counts) - 1, offsets)
+            geometry, first_stamp, duration_ticks = _span(first, last)
         text = source["configuration_yaml"][()] if "configuration_yaml" in source else ""
         configuration = text.decode("utf-8") if isinstance(text, bytes) else str(text)
         info = CurrentCaptureInfo(
@@ -196,11 +338,11 @@ def _boundary_ticks(time_us: float) -> int:
     return math.ceil(scaled)
 
 
-def _lower_bound(source: h5py.File, info: CurrentCaptureInfo, target: int) -> int:
+def _lower_bound(source: _Source, info: CurrentCaptureInfo, target: int) -> int:
     low, high = 0, info.windows
     while low < high:
         mid = (low + high) // 2
-        ticks = (int(source["timestamps"][mid]) - info.first_timestamp) & MASK64
+        ticks = (source.timestamp(info, mid) - info.first_timestamp) & MASK64
         if ticks < target:
             low = mid + 1
         else:
@@ -209,7 +351,7 @@ def _lower_bound(source: h5py.File, info: CurrentCaptureInfo, target: int) -> in
 
 
 def _blocks(
-    source: h5py.File,
+    source: _Source,
     info: CurrentCaptureInfo,
     left: int,
     right: int,
@@ -223,7 +365,7 @@ def _blocks(
     for batch in range(p0, p1, _PACKET_BATCH):
         _check_cancelled(cancelled)
         # Read fixed-size batches; retain no open file or IIO handles in results.
-        raw = source["packets"][batch : min(batch + _PACKET_BATCH, p1)]
+        raw = source.packets(batch, min(batch + _PACKET_BATCH, p1))
         for j, row in enumerate(raw, batch):
             packet = decode_sum_packet(row.tobytes(), info.geometry)
             continuity.append(packet)
@@ -232,7 +374,8 @@ def _blocks(
                 raise ValueError("Stored valid_count differs from raw packet")
             data = np.column_stack((packet.timestamps, packet.sums))
             for col, name in enumerate(("timestamps", "sums")):
-                if not np.array_equal(source[name][begin:end], data[:, col]):
+                stored = source.stored(name, begin, end)
+                if stored is not None and not np.array_equal(stored, data[:, col]):
                     raise ValueError(f"Stored {name} differs from raw packet")
             a, b = max(left, begin), min(right, end)
             if a < b:
@@ -334,7 +477,7 @@ def read_current_chunk(
     stamps, values, row_numbers, averages = [], [], [], []
     interval = info.geometry.interval_ticks if info.geometry else 1
     average = _MovingAverage(average_kernel, interval) if average_kernel else None
-    with h5py.File(info.path, "r") as source:
+    with _open_source(info) as source:
         start_tick = _boundary_ticks(start_us)
         end_tick = _boundary_ticks(max(start_us, end_us))
         left = _lower_bound(source, info, start_tick)

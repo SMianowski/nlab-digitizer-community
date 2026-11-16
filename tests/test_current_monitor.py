@@ -129,6 +129,7 @@ def test_controller_renders_calibrated_latest_and_interval_values(qtbot: QtBot) 
         "dma_gap_cycles": 12_500,
         "analysis_bin_ms": 100,
         "sum_frame_samples": 1024,
+        "sum_file_format": "binary",
         "pause_readbacks": False,
     }
     controller.apply_configuration_settings(
@@ -137,6 +138,7 @@ def test_controller_renders_calibrated_latest_and_interval_values(qtbot: QtBot) 
             "scale_per_code": 0.125,
             "unit": "uA",
             "dma_gap_cycles": 10_453,
+            "sum_file_format": "hdf5",
         }
     )
     assert controller.configuration_settings() == {
@@ -148,6 +150,7 @@ def test_controller_renders_calibrated_latest_and_interval_values(qtbot: QtBot) 
         "dma_gap_cycles": 10_453,
         "analysis_bin_ms": 100,
         "sum_frame_samples": 1024,
+        "sum_file_format": "hdf5",
         "pause_readbacks": False,
     }
     assert controller.ui.spinDmaGap.value() == pytest.approx(83.624)
@@ -401,14 +404,17 @@ def test_controller_scope_dma_mode_renders_accumulated_summaries(qtbot: QtBot) -
     controller._display_timer.stop()
 
     assert controller.ui.lblRaw.text() == "2,045"
-    assert "gap 0.100 ms" in controller.ui.lblAcquisition.text()
+    assert "% coverage" in controller.ui.lblAcquisition.text()
+    # Diagnostic detail moved from the labels into their tooltips.
+    assert "gap 0.100 ms" in controller.ui.lblAcquisition.toolTip()
     assert "nominal/median spacing 0.116/0.369 ms" in (
-        controller.ui.lblAcquisition.text()
+        controller.ui.lblAcquisition.toolTip()
     )
-    assert "window 16.368 us" in controller.ui.lblAcquisition.text()
-    assert "Analyzed 2/2 received frames" in controller.status.text()
-    assert "iiod-batched, buffers=4, READBUF x64" in controller.status.text()
-    assert "queue=0/high 0" in controller.status.text()
+    assert "window 16.368 us" in controller.ui.lblAcquisition.toolTip()
+    assert "2/2 frames" in controller.status.text()
+    assert "Analyzed 2/2 received frames" in controller.status.toolTip()
+    assert "iiod-batched, buffers=4, READBUF x64" in controller.status.toolTip()
+    assert "queue=0/high 0" in controller.status.toolTip()
     assert controller.ui.labelInterval.text() == "Latest DMA fragment:"
     x_values, y_values = controller._curve.getData()
     assert x_values.size == y_values.size == 4_093
@@ -431,9 +437,8 @@ def test_controller_scope_dma_mode_renders_accumulated_summaries(qtbot: QtBot) -
     controller.ui.btnResetScopeDefaults.click()
     assert scope.resets == 1
     assert controller.ui.spinDmaGap.value() == pytest.approx(100.0)
-    assert controller.status.text() == (
-        "Scope defaults restored; Current DMA optimization is inactive."
-    )
+    assert controller.status.text() == "Scope defaults restored."
+    assert controller.status.toolTip() == "Current DMA optimization is inactive."
 
 
 def test_controller_throttles_bounded_raw_waveform_plot(

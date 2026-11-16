@@ -78,6 +78,14 @@ _DMA_GAP_MAX_CYCLES = 65_535
 _DEFAULT_DMA_GAP_CYCLES = 12_500
 _DMA_PLOT_HZ = 2
 _DMA_PLOT_PERIOD_NS = round(1_000_000_000 / _DMA_PLOT_HZ)
+# comboSumFormat order; the extension selects the recorder (scope_sums.open_sum_writer).
+_SUM_FORMATS = ("binary", "hdf5")
+_SUM_FORMAT_SUFFIX = {"binary": ".bin", "hdf5": ".h5"}
+_SUFFIX_SUM_FORMAT = {".bin": "binary", ".h5": "hdf5", ".hdf5": "hdf5"}
+_SUM_FILE_FILTERS = {
+    "binary": "Binary sum capture (*.bin)",
+    "hdf5": "HDF5 sum capture (*.h5 *.hdf5)",
+}
 
 
 class CurrentMonitorController(QWidget):
@@ -159,6 +167,32 @@ class CurrentMonitorController(QWidget):
     def channel(self) -> int:
         return self._channel
 
+    def _set_status(self, text: str, details: str = "") -> None:
+        """Short status-bar message; diagnostic detail goes in its tooltip."""
+        self.status.setText(text)
+        self.status.setToolTip(details)
+
+    def _sum_format(self) -> str:
+        return _SUM_FORMATS[max(0, self.ui.comboSumFormat.currentIndex())]
+
+    def _select_sum_format(self, suffix: str) -> None:
+        file_format = _SUFFIX_SUM_FORMAT.get(suffix.lower())
+        if file_format is not None:
+            self.ui.comboSumFormat.setCurrentIndex(_SUM_FORMATS.index(file_format))
+
+    @Slot()
+    def _on_sum_file_edited(self) -> None:
+        self._select_sum_format(Path(self.ui.editSumFile.text().strip()).suffix)
+
+    @Slot(int)
+    def _on_sum_format_changed(self, _index: int) -> None:
+        # Keep a typed name's extension in step with the selected format.
+        text = self.ui.editSumFile.text().strip()
+        typed = _SUFFIX_SUM_FORMAT.get(Path(text).suffix.lower())
+        if text and typed is not None and typed != self._sum_format():
+            wanted = _SUM_FORMAT_SUFFIX[self._sum_format()]
+            self.ui.editSumFile.setText(str(Path(text).with_suffix(wanted)))
+
     def _setup_plot(self) -> None:
         self.ui.plotCurrent.setBackground("#f8f9fa")
         plot = self.ui.plotCurrent.getPlotItem()
@@ -203,6 +237,8 @@ class CurrentMonitorController(QWidget):
         self.ui.comboMode.currentIndexChanged.connect(self._on_mode_changed)
         self.ui.btnSumFile.clicked.connect(self._choose_sum_output)
         self.ui.btnOpenSums.clicked.connect(self._choose_sum_capture)
+        self.ui.editSumFile.editingFinished.connect(self._on_sum_file_edited)
+        self.ui.comboSumFormat.currentIndexChanged.connect(self._on_sum_format_changed)
         self.ui.cbPauseReadbacks.toggled.connect(
             lambda _checked: self._sync_readback_pause(
                 getattr(self, "_controls_running", False)
@@ -251,7 +287,9 @@ class CurrentMonitorController(QWidget):
             sum_mode and not running and self._sum_supported()
             and not self._replay_hardware_interlocked
         )
-        for record_widget in (self.ui.cbRecordSums, self.ui.editSumFile, self.ui.btnSumFile):
+        for record_widget in (
+            self.ui.cbRecordSums, self.ui.comboSumFormat, self.ui.editSumFile, self.ui.btnSumFile,
+        ):
             record_widget.setEnabled(record_enabled)
         self.ui.btnOpenSums.setEnabled(True)
         self.ui.spinSumSamples.setEnabled(record_enabled)
@@ -297,7 +335,7 @@ class CurrentMonitorController(QWidget):
         self._last_mode_index = index
         dma_mode = index == _MODE_SCOPE_DMA
         sum_mode = index == _MODE_PERIODIC_SUM
-        self.ui.btnStart.setText("Start monitor")
+        self.ui.btnStart.setText("Start")
         self.ui.sumControls.setVisible(sum_mode)
         self.ui.sumTimingControls.setVisible(sum_mode or dma_mode)
         for widget in (self.ui.labelSumSamples, self.ui.spinSumSamples, self.ui.labelSumTiming):
@@ -310,7 +348,8 @@ class CurrentMonitorController(QWidget):
             "Post-frame gap for Scope DMA; 0.008 us (8 ns) hardware resolution."
         )
         self.ui.groupReading.setTitle("Window means" if sum_mode else "Live current")
-        self.ui.groupCalibration.setEnabled(not sum_mode)
+        # Sums are ADC codes; the IIR/waveform calibration never applies to them.
+        self.ui.groupCalibration.setVisible(not sum_mode)
         self.ui.btnZero.setEnabled(not sum_mode and self._latest is not None)
         self.ui.labelRaw.setText(
             "Window mean:" if sum_mode else "Raw DMA sample:" if dma_mode else "Raw IIR code:"
@@ -330,10 +369,11 @@ class CurrentMonitorController(QWidget):
             return
         self._set_running_controls(False)
         if sum_mode:
-            self.status.setText(
-                "Start to plot measured window means here; optional HDF5 recording. "
-                "Set Window size and Window gap here while stopped. "
-                "The sum view reports ADC codes, without the IIR/waveform calibration."
+            self._set_status(
+                "Periodic sums stopped.",
+                "Start plots measured window means in ADC codes, without the "
+                "IIR/waveform calibration. Window size and gap apply on Start; "
+                "recording is optional.",
             )
         elif dma_mode and not self._dma_supported():
             self.status.setText(
@@ -356,8 +396,8 @@ class CurrentMonitorController(QWidget):
             log.exception("Resetting Scope defaults failed")
             return
         self._set_dma_gap_cycles(_DEFAULT_DMA_GAP_CYCLES)
-        self.status.setText(
-            "Scope defaults restored; Current DMA optimization is inactive."
+        self._set_status(
+            "Scope defaults restored.", "Current DMA optimization is inactive."
         )
 
     def _sum_frame_samples(self) -> int:
@@ -371,8 +411,7 @@ class CurrentMonitorController(QWidget):
         duration_ns = self._sum_frame_samples() * SCOPE_ADC_SAMPLE_PERIOD_NS
         interval_ns = duration_ns + self._dma_gap_cycles() * _DMA_GAP_CYCLE_NS
         self.ui.labelSumTiming.setText(
-            f"Window: {duration_ns / 1000:.3f} us; "
-            f"start interval: {interval_ns / 1000:.3f} us"
+            f"= {duration_ns / 1000:.3f} µs every {interval_ns / 1000:.3f} µs"
         )
 
     def _dma_gap_cycles(self) -> int:
@@ -554,39 +593,56 @@ class CurrentMonitorController(QWidget):
         self._acquisition = CurrentAcquisition.SUMS
         self._stop_requested = False
         self._set_running_controls(True)
-        self.status.setText("Acquiring periodic sums; Stop drains accepted tail windows.")
+        self._set_status(
+            "Acquiring periodic sums…",
+            "Stop and drain keeps the windows the board already accepted.",
+        )
         self._next_display_ns = time.perf_counter_ns() + self._display_period_ns
         self._schedule_display()
 
     def _sum_output_path(self) -> Path:
-        """Resolve explicit names or generate a fresh name in the measurement folder."""
+        """Resolve explicit names or generate a fresh name in the measurement folder.
+
+        A .bin, .h5 or .hdf5 extension selects that format; any other name
+        gains the extension of the format selected in the GUI.
+        """
+        suffix = _SUM_FORMAT_SUFFIX[self._sum_format()]
         filename = self.ui.editSumFile.text().strip()
         if filename:
             output = Path(filename).expanduser()
-            if not output.suffix:
-                output = output.with_suffix(".h5")
+            if output.suffix.lower() not in _SUFFIX_SUM_FORMAT:
+                output = output.with_name(output.name + suffix)
             if output.is_absolute():
                 return output
-        if filename:
             return measurement_folder() / output
-        return unique_recording_path(f"ch{self._channel}_current", ".h5", create_folder=False)
+        return unique_recording_path(f"ch{self._channel}_current", suffix, create_folder=False)
 
     def _choose_sum_output(self) -> None:
         folder = str(measurement_folder())
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "Sum recording", folder, "Scope sum capture (*.h5)",
+        selected = self._sum_format()
+        filters = [_SUM_FILE_FILTERS[selected]] + [
+            text for key, text in _SUM_FILE_FILTERS.items() if key != selected
+        ]
+        filename, chosen_filter = QFileDialog.getSaveFileName(
+            self, "Sum recording", folder, ";;".join(filters),
             options=QFileDialog.Option.DontConfirmOverwrite,
         )
         if filename:
             output = Path(filename)
-            if not output.suffix:
-                output = output.with_suffix(".h5")
+            if output.suffix.lower() not in _SUFFIX_SUM_FORMAT:
+                chosen = next(
+                    (key for key, text in _SUM_FILE_FILTERS.items() if text == chosen_filter),
+                    selected,
+                )
+                output = output.with_name(output.name + _SUM_FORMAT_SUFFIX[chosen])
             self.ui.editSumFile.setText(str(output))
+            self._select_sum_format(output.suffix)
             self.ui.cbRecordSums.setChecked(True)
 
     def _choose_sum_capture(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
-            self, "Open sum capture", "", "Scope sum capture (*.h5)"
+            self, "Open sum capture", "",
+            "Sum captures (*.bin *.h5 *.hdf5);;All files (*)",
         )
         if filename:
             self.open_sum_capture(Path(filename))
@@ -641,20 +697,30 @@ class CurrentMonitorController(QWidget):
             latest = float(data[-1, 1])
             self.ui.lblCurrent.setText(f"{self._format_value(latest)} ADC codes")
             self.ui.lblRaw.setText(self._format_value(latest))
-            self.ui.lblInterval.setText(f"{self._format_value(mean)} ADC codes (sample-weighted)")
+            self.ui.lblInterval.setText(f"{self._format_value(mean)} ADC codes")
+            self.ui.lblInterval.setToolTip("Sample-weighted mean of every window this session.")
+            windows, missed = snapshot["windows"], snapshot["missed"]
+            offered = windows + missed
+            coverage = 100 * windows / offered if offered else 100.0
             self.ui.lblAcquisition.setText(
-                f"{snapshot['windows']:,} windows; {snapshot['samples']:,} samples; "
-                f"exposure {snapshot['coverage_ns'] * 1e-9:.6g} s"
+                f"{windows:,} windows · {coverage:.2f}% coverage"
+            )
+            self.ui.lblAcquisition.setToolTip(
+                f"{snapshot['samples']:,} ADC samples; exposure "
+                f"{snapshot['coverage_ns'] * 1e-9:.6g} s. Coverage counts the windows "
+                "the board missed; at gap 0 it skips one while sealing each "
+                "508-window packet (about 0.2% at 256 samples)."
             )
             if not worker.done:
-                state = "Draining accepted tail windows" if self._stop_requested else "Live sums"
-                self.status.setText(
-                    f"{state}; IP{snapshot.get('ip_version')}; "
+                state = "Draining tail" if self._stop_requested else "Live sums"
+                self._set_status(
+                    f"{state} · missed {missed:,} · gaps {snapshot['skipped']:,}",
+                    f"IP{snapshot.get('ip_version')}; "
                     f"N={snapshot.get('samples_per_window')} samples; "
                     f"gap={snapshot.get('gap_cycles')} cycles; "
-                    f"interval={snapshot.get('interval_ns')} ns. "
-                    f"Missed (hardware): {snapshot['missed']}; "
-                    f"gaps (timestamps): {snapshot['skipped']}. ADC codes; calibration required."
+                    f"interval={snapshot.get('interval_ns')} ns. Missed windows come "
+                    "from the hardware counter, gaps from the timestamps. Values are "
+                    "ADC codes; physical current needs a calibration.",
                 )
         if worker.done:
             self._finish_sum_monitor()
@@ -919,10 +985,12 @@ class CurrentMonitorController(QWidget):
             else math.nan
         )
         self.ui.lblInterval.setText(
-            f"last {self._format_value(current)}; "
             f"min {self._format_value(converted_minimum)}; "
-            f"max {self._format_value(converted_maximum)} {unit}; "
-            f"samples={geometry.waveform_samples if geometry is not None else 0:,}"
+            f"max {self._format_value(converted_maximum)} {unit}"
+        )
+        self.ui.lblInterval.setToolTip(
+            f"Latest frame: last {self._format_value(current)} {unit}; "
+            f"{geometry.waveform_samples if geometry is not None else 0:,} waveform samples."
         )
 
         runtime = snapshot.runtime
@@ -944,10 +1012,12 @@ class CurrentMonitorController(QWidget):
                 f"{nominal_ms:.3f}/{snapshot.median_interval_ns / 1_000_000:.3f} ms"
             )
         self.ui.lblAcquisition.setText(
-            f"{snapshot.received_fps:,.1f} recv frames/s; "
+            f"{snapshot.received_fps:,.1f} frames/s · "
+            f"{snapshot.observed_coverage_percent:.2f}% coverage"
+        )
+        self.ui.lblAcquisition.setToolTip(
             f"{snapshot.payload_mb_s:.3f} MB/s; {timing_text}; "
-            f"window {window_us:.3f} us; coverage "
-            f"{snapshot.observed_coverage_percent:.2f}%; "
+            f"window {window_us:.3f} us; "
             f"age {snapshot.data_age_ns / 1_000_000:.1f} ms"
         )
 
@@ -969,6 +1039,10 @@ class CurrentMonitorController(QWidget):
             self._render_dma_plot(snapshot, zero, scale)
             self._last_dma_plot_update_ns = render_time_ns
         status = (
+            f"Live DMA · {snapshot.analyzed_frames:,}/{snapshot.received_frames:,} frames · "
+            f"skipped {snapshot.skipped_opportunities:,}"
+        )
+        details = (
             f"Analyzed {snapshot.analyzed_frames:,}/{snapshot.received_frames:,} "
             f"received frames; {runtime_text}; skipped opportunities "
             f"{snapshot.skipped_opportunities:,}; off-grid "
@@ -983,7 +1057,8 @@ class CurrentMonitorController(QWidget):
             f"{snapshot.protocol_errors:,}."
         )
         if snapshot.rejected_frames or snapshot.discarded_analysis_frames:
-            status += (
+            status += f" · rejected {snapshot.rejected_frames:,}"
+            details += (
                 f" Rejected {snapshot.rejected_frames:,}; analysis discarded "
                 f"{snapshot.discarded_analysis_frames:,}."
             )
@@ -996,7 +1071,7 @@ class CurrentMonitorController(QWidget):
                 f"Stale: newest DMA frame is "
                 f"{snapshot.data_age_ns / 1_000_000:.1f} ms old. " + status
             )
-        self.status.setText(status)
+        self._set_status(status, details)
 
     def _render_dma_plot(
         self,
@@ -1100,10 +1175,10 @@ class CurrentMonitorController(QWidget):
         elif age_ns > stale_ns:
             status = f"Stale: newest sample is {age_ns / 1_000_000:.1f} ms old."
         else:
-            status = "Live FPGA IIR status; host timestamps are transaction midpoints."
+            status = "Live IIR polling."
         if self._dropped_samples:
             status += f" Display buffer dropped {self._dropped_samples:,} sample(s)."
-        self.status.setText(status)
+        self._set_status(status, "FPGA IIR output; host timestamps are transaction midpoints.")
 
         if len(history):
             timestamps = history.timestamps
@@ -1125,6 +1200,7 @@ class CurrentMonitorController(QWidget):
             "display_fps": self._display_hz,
             "dma_gap_cycles": self._dma_gap_cycles(),
             "sum_frame_samples": self._sum_frame_samples(),
+            "sum_file_format": self._sum_format(),
             "pause_readbacks": self.ui.cbPauseReadbacks.isChecked(),
             "analysis_bin_ms": (
                 self._scope_current_accumulator.bin_width_ms
@@ -1158,6 +1234,12 @@ class CurrentMonitorController(QWidget):
                     self.start_monitor()
         if "pause_readbacks" in settings:
             self.ui.cbPauseReadbacks.setChecked(bool(settings["pause_readbacks"]))
+        if settings.get("sum_file_format") in _SUM_FORMATS:
+            if self._is_running():
+                raise RuntimeError("cannot change the sum file format while monitor is running")
+            self.ui.comboSumFormat.setCurrentIndex(
+                _SUM_FORMATS.index(str(settings["sum_file_format"]))
+            )
         if "zero_code" in settings:
             self.ui.spinZero.setValue(float(settings["zero_code"]))
         if "scale_per_code" in settings:

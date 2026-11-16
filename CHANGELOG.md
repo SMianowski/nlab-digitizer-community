@@ -9,7 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+### Added
+
+- Current periodic sums can record to a compact binary file: **Record** now has a
+  **Format** choice, **Binary (.bin)** (default) or **HDF5 (.h5)**. The NSUM
+  container (`nlab/hardware/digitizer/scope_sum_file.py`, specified in
+  `docs/scope-sum-format.md`) stores the original 4096-byte packets unchanged
+  between a JSON header and a trailer written only after the data is flushed; a
+  file cut off by a crash stays readable up to its last whole packet and reports
+  incomplete. It writes a third of the HDF5 bytes at about 1.5 instead of 14 µs per
+  packet in the reader process. Live on .128 (IP124, gap 0, plot shown,
+  recording): 192-sample windows (384 ns) covered 99.66–99.73% (HDF5 before this
+  release: 89.7–94.6%) and 160 samples (320 ns) 97.6–98.5% (HDF5: 81%). Current
+  Capture Analysis, `read_sum_capture()` and session replay read both formats;
+  the extension selects the format. Below about 160 samples the board's DMA and
+  Ethernet path saturates near 26 MB/s whatever the client does.
+
+### Changed
+
+- Current tab: shorter labels with the detail in tooltips. **Start**, **Set
+  zero** and **Pause readbacks** replace the longer button texts; the window
+  preview reads "= 2.048 µs every 102.048 µs"; the Scope DMA and sum readouts show
+  rate and coverage, and the status bar shows a one-line summary whose tooltip
+  holds the full transport, queue and loss diagnostics. The disabled calibration
+  box is hidden in periodic-sum mode, where it never applies.
+- The sum recorder batches up to 64 packets (was 16) behind a 2048-packet queue
+  (was 256). HDF5 recording at 192-sample windows now covers 99.0–99.75%.
 
 - Current periodic sums lost windows while the Current plot was on screen. Live on
   .128 (IP124, 256-sample windows, gap 0) the shown GUI path covered 87.7–93% of the

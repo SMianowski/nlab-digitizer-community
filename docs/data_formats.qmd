@@ -17,6 +17,8 @@ different payloads and version rules.
 | MCA IIO DMA | `.h5` | Appendable canonical event dataset and embedded YAML | `committed_events`, `capture_complete`, run summary |
 | MCA IIO DMA | `.root` | Canonical `events` TTree and embedded metadata | Run summary and successful close |
 | MCA IIO DMA | Online-only | No file | GUI/session diagnostics only |
+| Current periodic sums | NSUM `.bin` | Original 4096-byte sum packets, JSON header and trailer | Trailer `complete` flag, packet count, hardware missed-window counter |
+| Current periodic sums | `.h5` | Original packets plus decoded timestamp/sum columns | `complete` attribute, column/packet agreement, missed-window counter |
 | Coincidence matrix | `.h5` or `.root` | Prompt/random/corrected matrices, axes, gates, calibration | Export metadata and session diagnostics |
 
 ## NDMA header and versions

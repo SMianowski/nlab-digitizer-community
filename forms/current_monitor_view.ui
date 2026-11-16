@@ -27,11 +27,11 @@
        <property name="toolTip"><string>Restore the Scope hardware defaults after stopping Current DMA.</string></property>
       </widget>
      </item>
-     <item><widget class="QPushButton" name="btnZero"><property name="text"><string>Set zero from recent samples</string></property><property name="enabled"><bool>false</bool></property></widget></item>
+     <item><widget class="QPushButton" name="btnZero"><property name="text"><string>Set zero</string></property><property name="toolTip"><string>Set the zero code from the mean of recent samples.</string></property><property name="enabled"><bool>false</bool></property></widget></item>
      <item>
       <widget class="QCheckBox" name="cbPauseReadbacks">
-       <property name="text"><string>Pause MCA, HV and temperature readbacks during capture</string></property>
-       <property name="toolTip"><string>While this Current acquisition runs, pause MCA histogram/statistics, Power Supply (HV and temperature) and Global diagnostics polling on all channels, so they do not compete with the capture on the board. Measurements and HV setpoints are unaffected; displays update again when Current stops. Temperature correction holds its last applied value while paused.</string></property>
+       <property name="text"><string>Pause readbacks</string></property>
+       <property name="toolTip"><string>Pause MCA, HV and temperature readbacks during capture. While this Current acquisition runs, pause MCA histogram/statistics, Power Supply (HV and temperature) and Global diagnostics polling on all channels, so they do not compete with the capture on the board. Measurements and HV setpoints are unaffected; displays update again when Current stops. Temperature correction holds its last applied value while paused.</string></property>
       </widget>
      </item>
      <item><spacer name="controlsSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property></spacer></item>
@@ -78,10 +78,17 @@
       <property name="topMargin"><number>0</number></property>
       <property name="rightMargin"><number>0</number></property>
       <property name="bottomMargin"><number>0</number></property>
-      <item><widget class="QCheckBox" name="cbRecordSums"><property name="text"><string>Record HDF5 sums</string></property><property name="toolTip"><string>Record original sum packets and exact timestamps to a new HDF5 file.</string></property></widget></item>
-      <item><widget class="QLineEdit" name="editSumFile"><property name="placeholderText"><string>Automatic filename on Start</string></property><property name="toolTip"><string>Leave blank for chN_current_&lt;timestamp&gt;.h5 on Start. Relative filenames use the measurement folder from General Settings. Existing files require overwrite confirmation.</string></property></widget></item>
-      <item><widget class="QPushButton" name="btnSumFile"><property name="text"><string>Browse...</string></property><property name="toolTip"><string>Choose a sum recording file, starting in the measurement folder from General Settings.</string></property></widget></item>
-      <item><widget class="QPushButton" name="btnOpenSums"><property name="text"><string>Open sum capture...</string></property><property name="toolTip"><string>Open the dedicated Current capture analysis tool without interrupting live acquisition.</string></property></widget></item>
+      <item><widget class="QCheckBox" name="cbRecordSums"><property name="text"><string>Record</string></property><property name="toolTip"><string>Record the original sum packets to a new file, in the selected format.</string></property></widget></item>
+      <item>
+       <widget class="QComboBox" name="comboSumFormat">
+        <property name="toolTip"><string>Binary (.bin): the packets exactly as received, about a third of the size, and about ten times cheaper to write; use it for windows shorter than 448 ns. HDF5 (.h5): also stores decoded timestamp and sum columns and opens in generic HDF5 tools. Current Capture Analysis opens both.</string></property>
+        <item><property name="text"><string>Binary (.bin)</string></property></item>
+        <item><property name="text"><string>HDF5 (.h5)</string></property></item>
+       </widget>
+      </item>
+      <item><widget class="QLineEdit" name="editSumFile"><property name="placeholderText"><string>Automatic filename on Start</string></property><property name="toolTip"><string>Leave blank for chN_current_&lt;timestamp&gt; with the selected format's extension on Start. A .bin, .h5 or .hdf5 extension selects that format. Relative filenames use the measurement folder from General Settings. Existing files require overwrite confirmation.</string></property></widget></item>
+      <item><widget class="QPushButton" name="btnSumFile"><property name="text"><string>Browse…</string></property><property name="toolTip"><string>Choose a sum recording file, starting in the measurement folder from General Settings.</string></property></widget></item>
+      <item><widget class="QPushButton" name="btnOpenSums"><property name="text"><string>Open capture…</string></property><property name="toolTip"><string>Open a recorded sum capture (.bin or .h5) in Current Capture Analysis, without interrupting live acquisition.</string></property></widget></item>
      </layout>
     </widget>
    </item>

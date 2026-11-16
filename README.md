@@ -95,9 +95,10 @@ acquisition and completes the file. **Stop** keeps receiving the frames the
 hardware had already accepted until the stream goes quiet, so a recording keeps its
 tail; data left over from an interrupted earlier session is detected and discarded
 at the start of the next one.
-Current periodic-sum HDF5 recording uses the measurement folder in General
-Settings. Leave the filename blank for `ch0_current_<timestamp>.h5` on Start,
-or enter your own name or path. Saving runs in the background and asks before
+Current periodic sums record to a compact binary `.bin` file (default) or to
+HDF5 (`.h5`), in the measurement folder from General Settings. Leave the
+filename blank for `ch0_current_<timestamp>.bin` on Start, or enter your own
+name or path. Saving runs in the background and asks before
 replacing an existing file.
 The [acquisition guide](https://github.com/nucliflare/nlab-digitizer-community/wiki/acquisition_workflows)
 covers recording and advanced workflows.

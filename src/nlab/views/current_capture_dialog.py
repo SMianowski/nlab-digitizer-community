@@ -64,7 +64,7 @@ class CurrentCaptureDialog(QDialog):
         self.close_action = QAction("&Close", self)
         self.close_action.setShortcut(QKeySequence.StandardKey.Close)
         file_menu.addAction(self.close_action)
-        self.file_label = QLabel("Open a periodic-sum HDF5 capture (File > Open) to begin.")
+        self.file_label = QLabel("Open a periodic-sum capture (File > Open) to begin.")
         self.file_label.setTextFormat(Qt.TextFormat.PlainText)
         root.addWidget(self.file_label)
         self.capture_status = QLabel()
@@ -277,7 +277,7 @@ class CurrentCaptureDialog(QDialog):
             self,
             "Open Current capture",
             "",
-            "Current sum capture (*.h5 *.hdf5)",
+            "Current sum capture (*.bin *.h5 *.hdf5);;All files (*)",
         )
         if filename:
             self.open_path(Path(filename))
@@ -348,7 +348,8 @@ class CurrentCaptureDialog(QDialog):
         self.start_spin.setMaximum(max(0, info.duration_us - 0.008))
         self.start_spin.blockSignals(False)
         self.capture_status.setText(
-            f"Measured periodic sums · source channel {info.metadata.get('channel', '?')} · "
+            f"Measured periodic sums ({'binary' if info.container == 'nsum' else 'HDF5'}) · "
+            f"source channel {info.metadata.get('channel', '?')} · "
             f"{info.windows:,} windows · {info.duration_us:,.3f} µs · "
             f"Complete={info.complete} · final hardware missed: {info.final_missed_windows:,}"
             + (f" · {info.cleanup_error}" if info.cleanup_error else "")

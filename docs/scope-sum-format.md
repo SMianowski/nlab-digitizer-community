@@ -1,5 +1,11 @@
 # Scope periodic-sum capture format (version 1)
 
+Periodic sums are recorded in one of two containers, chosen by file extension
+(**Current > Format**): HDF5 (`.h5`, `.hdf5`) or NSUM binary (`.bin`, see
+[NSUM binary container](#nsum-binary-container) below). Both store the same
+original 4096-byte packets and the same metadata; Current Capture Analysis and
+`read_sum_capture()` open either.
+
 The HDF5 root attribute `format` is `nlab-scope-sums`; `format_version` is 1.
 This container stores measured Scope aggregates. It is independent of NDMA
 waveform and MCA event formats. IP123 and IP124 wire packets are decoded by
@@ -40,9 +46,11 @@ receiving complete packets through an explicit server ETIMEDOUT reply, checks
 pending/invalid status, then closes the stream. A socket timeout or malformed
 response cannot establish a clean drain and leaves the capture incomplete.
 
-Recording uses a separate HDF5 thread with a 256-packet queue. Appends batch
-up to 16 packets or 100 ms, whichever occurs first; no HDF5 calls run on the DMA
-reader. Queue overflow is a capture error rather than blocking the reader or
+Recording uses a separate writer thread with a 2048-packet queue (about 0.4 s
+at 192-sample windows). Appends batch up to 64 packets or 100 ms, whichever
+occurs first; no file calls run on the DMA reader. The writer still shares the
+reader process's interpreter lock: HDF5 costs about 14 us per packet in batches
+of 64 (29 us in batches of 16), NSUM binary about 1.5 us. Queue overflow is a capture error rather than blocking the reader or
 silently dropping recorded packets. Stop joins the writer after draining its
 queue, including a final partial batch. Raw packets and exact decoded columns
 retain the version 1 layout above.
@@ -81,6 +89,41 @@ to `create_sum_capture`. Large configuration text stays in a dataset rather than
 an attribute. The viewer reads/exports it without applying it to hardware.
 Older version 1 files without it remain supported and do not imply a recovered
 configuration. This is an additive extension, with no wire-format change.
+
+## NSUM binary container
+
+A `.bin` sum recording starts with the 4-byte magic `NSUM`, never `NDMA`: the
+NDMA formats describe waveforms and list-mode records, and sums must not reach
+their readers. All integers are little-endian.
+
+| Part | Layout |
+| --- | --- |
+| Preamble | `char[4] "NSUM"`, `u16 version` (1), `u16 reserved` (0), `u32 header_bytes` |
+| Header | `header_bytes` of UTF-8 JSON, zero padded so the first packet starts at a multiple of 4096 bytes |
+| Packets | The original 4096-byte IP123/IP124 packets, unchanged and in order |
+| Trailer | One 4096-byte block: `char[16] "NSUM-END" "TRAILER\0"`, `u32 json_bytes`, UTF-8 JSON, zero padding |
+
+The header JSON holds `format` (`nlab-scope-sums`), `format_version` (1),
+`container` (`nsum`), `signal_origin`, `created_utc`, `timestamp_unit`,
+`sum_unit`, `packet_bytes`, `metadata` (the same mapping as HDF5
+`metadata_json`) and `configuration_yaml` (empty when not supplied). The
+trailer JSON holds `complete`, `cleanup_error`, `final_missed_windows`,
+`runtime_metadata` (or null) and `packets`, which must equal the number of
+packet blocks. Bytes 8-16 of the trailer marker can never equal a packet's ABI
+magic, so the trailer cannot be mistaken for a packet.
+
+There are no decoded columns: timestamps and sums are decoded from the packets
+when read, and valid counts follow from the producer contract that every packet
+except a final STOP flush is full. Readers find packet `i` at
+`data_offset + 4096 * i` without an index.
+
+The trailer is written only after every packet has been flushed to disk, and is
+itself flushed before the file closes. A file without a trailer did not close
+(process or power loss): its packets up to the last whole 4096-byte block stay
+readable, and readers report it incomplete. A partial final block is ignored.
+Existing files are protected by exclusive creation, as for HDF5.
+
+## Display history
 
 The 8192-point display history is bounded independently of the recording and
 sample-weighted totals. GUI updates do not discard recorded windows. IP123

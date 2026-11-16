@@ -26,11 +26,13 @@ connected sensor and analogue front end.
 3. Enter or load the appropriate zero, scale, and display unit if calibrated
    current is required.
 4. In DMA mode, set the post-frame **DMA gap** while the monitor is stopped.
-5. Press **Start monitor**. Press **Stop monitor** before changing ownership of
+5. Press **Start**. Press **Stop** before changing ownership of
    the Scope or closing the application.
 
-When the input is in a known zero-current condition, **Set zero from recent
-samples** fills `zero_code` from the recent measurement window. Supply the
+Labels show the essentials; hover a value or the status bar for the full
+diagnostics (transport, queue, timing and loss counters).
+
+When the input is in a known zero-current condition, **Set zero** fills `zero_code` from the recent measurement window. Supply the
 independently established `scale_per_code` and unit to complete the linear
 calibration.
 
@@ -45,13 +47,21 @@ trigger selector. Stop any acquisition on this channel, then select
 and **Window gap** (0..524.280 us, step 0.008 us) in the timing row. The preview
 shows window duration (N times 2 ns) and the scheduled start interval. These
 settings apply on Start and remain locked through capture and tail drain.
-Optionally enable **Record HDF5 sums**, then press **Start monitor**. Leave the
-filename blank to generate `chN_current_<timestamp>.h5` in the measurement folder
-from **General Settings** on each Start. If a timestamped file already exists,
-the automatic name gains a numbered suffix. Enter a relative filename to use
-that folder, or choose an absolute path with **Browse...** to save elsewhere.
-Names without an extension gain `.h5`; missing folders are created in the
-background. If an explicitly named file already exists, confirm replacement in the
+Optionally enable **Record**, choose a **Format**, then press **Start**:
+
+- **Binary (.bin)**, the default: the packets exactly as received, about a
+  third of the size, and about ten times cheaper to write. Use it for windows
+  shorter than 448 ns.
+- **HDF5 (.h5)**: also stores decoded timestamp and sum columns and opens in
+  generic HDF5 tools.
+
+Leave the filename blank to generate `chN_current_<timestamp>` with the
+format's extension in the measurement folder from **General Settings** on each
+Start. If a timestamped file already exists, the automatic name gains a
+numbered suffix. Enter a relative filename to use that folder, or choose an
+absolute path with **Browse…** to save elsewhere. A `.bin`, `.h5` or `.hdf5`
+extension selects that format; other names gain the selected format's
+extension. Missing folders are created in the background. If an explicitly named file already exists, confirm replacement in the
 overwrite dialog or choose **Cancel** to preserve the recording and plot.
 Window means appear in the existing large Current plot, with the latest window
 mean and session statistics above it.
@@ -63,14 +73,30 @@ saving. Acquisition controls stay locked until the recording is closed.
 The sum monitor reports all-sample window means in ADC codes, sample-weighted
 session means, exposure, and missed windows. Expect a few missed windows even on an
 idle system: at gap 0 the IP skips one window while sealing each 508-window packet,
-so 256-sample windows reach about 99.8% coverage (measured live on IP124). Its aggregate data cannot supply
+so 256-sample windows reach about 99.8% coverage (measured live on IP124).
+
+Shortest windows at gap 0, measured live on .128 (IP124) with the plot shown:
+
+| Window | Not recording | Binary (.bin) | HDF5 (.h5) |
+|---|---|---|---|
+| 256 samples (512 ns) | 99.8% | 99.8% | 99.6–99.8% |
+| 192 samples (384 ns) | 99.7% | 99.7% | 99.0–99.75% |
+| 160 samples (320 ns) | 99.6% | 97.6–98.5% | not recommended |
+| 128 samples (256 ns) and shorter | 84% and falling | — | — |
+
+Below about 160 samples the board's DMA and Ethernet path saturates near
+26 MB/s (3.1–3.3 million windows/s, PetaLinux `scope-sum-short-window`
+report), so no host setting can avoid the loss. Results depend on the PC and
+on other board traffic; check the coverage shown under **Acquisition**.
+
+Its aggregate data cannot supply
 pulse waveforms, extrema, or noise spectra. The IIR/waveform calibration controls
 do not apply to this view; physical current conversion requires a qualified
 channel/DC-path calibration.
 
 Use **Stop and drain** to retain accepted tail windows. After the reader exits,
 the waveform trigger, frame size, pretrigger, and gap are restored; the final plot stays visible. Existing
-HDF5 sum files open in a dedicated offline tool using **Open sum capture** or
+sum files (`.bin` or `.h5`) open in a dedicated offline tool using **Open capture…** or
 **Tools > Current Capture Analysis**, without disturbing the live monitor.
 Choose a **View size** in µs; the first chunk loads automatically. Navigate with
 **First / Previous / Next / Last**, or enter a **Start** time in µs. The plot
@@ -106,7 +132,7 @@ configuration. See the [sum file specification](scope-sum-format.md).
    controls are disabled because IIR polling does not use the Scope DMA path.
 3. Leave **Display unit** set to `raw` unless a calibration for this exact
    channel and analogue path has already been entered.
-4. Press **Start monitor**. The large value is the newest signed IIR code; the
+4. Press **Start**. The large value is the newest signed IIR code; the
    plot shows the rolling history, while **Last screen interval** gives its
    mean, minimum, maximum, and sample count.
 5. Check **Acquisition** for the achieved read rate, median transaction time,
@@ -117,7 +143,7 @@ configuration. See the [sum file specification](scope-sum-format.md).
    lightweight monitor is running.
 
 If the input is known to represent zero current, let the history settle and
-then use **Set zero from recent samples**. This only establishes the offset;
+then use **Set zero**. This only establishes the offset;
 converting codes to amperes still requires an independently determined scale.
 
 ## Live reference: Na-22 on channel 1
@@ -128,7 +154,7 @@ connected. The application did not read or change the PSU during this run.
 The numeric values are specific to that analogue path and operating point;
 they are examples of the workflow, not calibration constants.
 
-In **IIR polling** mode, select `raw`, press **Start monitor**, and wait for the
+In **IIR polling** mode, select `raw`, press **Start**, and wait for the
 rolling plot to fill. This live capture shows the scalar input-filter output
 near `-1387` raw. The achieved host read rate was about 122 Hz, illustrating
 why the requested 1 kHz polling cadence is not a timing guarantee over remote
@@ -138,7 +164,7 @@ IIO.
 mode.](images/current-monitor-iir-live.png)
 
 Stop IIR polling before changing mode. Select **Scope DMA**, leave the
-qualified 100 us post-frame gap, and press **Start monitor** again. The DMA
+qualified 100 us post-frame gap, and press **Start** again. The DMA
 view below shows real negative detector pulses and the gaps between periodic
 Scope frames. At the captured instant it displayed about 406 received
 frames/s, 1.668 MB/s, 0.67% timestamp-derived coverage, and no protocol

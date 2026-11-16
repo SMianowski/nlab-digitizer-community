@@ -24,6 +24,8 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 
+from nlab.hardware.digitizer import scope_sum_file as sum_file
+
 if TYPE_CHECKING:
     from nlab.hardware.digitizer.reader_process import ReaderSession
 
@@ -370,8 +372,59 @@ class ScopeSumWriter:
             self._file.close()
 
 
+class ScopeSumBinaryWriter:
+    """NSUM sink (``scope_sum_file``) with ScopeSumWriter's interface."""
+
+    def __init__(
+        self, path: Path, metadata: dict[str, object], *, overwrite: bool = False,
+    ) -> None:
+        header: dict[str, Any] = dict(
+            format="nlab-scope-sums",
+            format_version=1,
+            container="nsum",
+            signal_origin="measurement",
+            created_utc=datetime.now(UTC).isoformat(),
+            timestamp_unit="8 ns",
+            sum_unit="offset-binary ADC code sum",
+            packet_bytes=sum_file.PACKET_BYTES,
+            metadata={k: v for k, v in metadata.items() if k != "configuration_yaml"},
+            configuration_yaml=str(metadata.get("configuration_yaml", "") or ""),
+        )
+        self._writer = sum_file.SumBinaryWriter(path, header, overwrite=overwrite)
+
+    def append(self, packet: ScopeSumPacket) -> None:
+        self.append_many([packet])
+
+    def append_many(self, packets: Sequence[ScopeSumPacket]) -> None:
+        self._writer.append_raw([packet.raw for packet in packets])
+
+    def close(
+        self, *, complete: bool, error: str = "", missed_windows: int = 0,
+        runtime_metadata: dict[str, object] | None = None,
+    ) -> None:
+        self._writer.close(dict(
+            complete=complete,
+            cleanup_error=error,
+            final_missed_windows=missed_windows,
+            runtime_metadata=runtime_metadata,
+        ))
+
+
+def sum_file_format(path: Path) -> str:
+    """Recording format chosen by extension: ``"binary"`` (.bin) or ``"hdf5"``."""
+    return "binary" if Path(path).suffix.lower() == sum_file.SUFFIX else "hdf5"
+
+
+def open_sum_writer(
+    path: Path, metadata: dict[str, object], *, overwrite: bool = False,
+) -> ScopeSumWriter | ScopeSumBinaryWriter:
+    if sum_file_format(path) == "binary":
+        return ScopeSumBinaryWriter(path, metadata, overwrite=overwrite)
+    return ScopeSumWriter(path, metadata, overwrite=overwrite)
+
+
 class ScopeSumRecorder:
-    """Bounded asynchronous sink; all HDF5 operations stay on one joined thread.
+    """Bounded asynchronous sink; all file operations stay on one joined thread.
 
     The DMA reader only enqueues immutable decoded packets. A full queue is a
     recording error, never blocking backpressure or silent packet loss. STOP
@@ -384,15 +437,19 @@ class ScopeSumRecorder:
         metadata: dict[str, object],
         *,
         overwrite: bool = False,
-        queue_packets: int = 256,
-        batch_packets: int = 16,
+        queue_packets: int = 2048,
+        batch_packets: int = 64,
         batch_seconds: float = 0.1,
     ) -> None:
+        # 2048 packets ride out ~0.4 s of storage stall at 192-sample windows.
+        # Batches of 64 halve HDF5's per-packet cost against 16 (14 vs 29 us),
+        # and the writer shares the reader process's interpreter lock.
         if queue_packets < 1 or batch_packets < 1 or not 0 < batch_seconds <= 1:
             raise ValueError("Invalid Scope sum recording queue/batch limits")
         self._queue: Queue[ScopeSumPacket] = Queue(maxsize=queue_packets)
         self._batch_packets = batch_packets
         self._batch_seconds = batch_seconds
+        self._label = "Binary" if sum_file_format(path) == "binary" else "HDF5"
         self._closing = threading.Event()
         self._ready = threading.Event()
         self._error = ""
@@ -402,7 +459,7 @@ class ScopeSumRecorder:
         self._runtime_metadata: dict[str, object] | None = None
         self._thread = threading.Thread(
             target=self._run, args=(path, metadata, overwrite),
-            name="Scope sum HDF5 writer", daemon=False,
+            name=f"Scope sum {self._label} writer", daemon=False,
         )
         self._thread.start()
         self._ready.wait()  # Create/validate the destination before acquisition is armed.
@@ -419,14 +476,14 @@ class ScopeSumRecorder:
             self._queue.put_nowait(packet)
         except Full:
             raise RuntimeError(
-                "HDF5 recording queue is full; storage cannot keep up. "
+                f"{self._label} recording queue is full; storage cannot keep up. "
                 "Acquisition stopped; the saved prefix is incomplete."
             ) from None
 
     def _run(self, path: Path, metadata: dict[str, object], overwrite: bool) -> None:
         writer = None
         try:
-            writer = ScopeSumWriter(path, metadata, overwrite=overwrite)
+            writer = open_sum_writer(path, metadata, overwrite=overwrite)
             self._ready.set()
             while not self._closing.is_set() or not self._queue.empty():
                 batch: list[ScopeSumPacket] = []
@@ -444,7 +501,7 @@ class ScopeSumRecorder:
                 if batch:
                     writer.append_many(batch)
         except Exception as exc:
-            self._error = f"HDF5 recording: {type(exc).__name__}: {exc}"
+            self._error = f"{self._label} recording: {type(exc).__name__}: {exc}"
         finally:
             if writer is not None:
                 error = "; ".join(part for part in (self._cleanup_error, self._error) if part)
@@ -457,7 +514,9 @@ class ScopeSumRecorder:
                     )
                 except Exception as exc:
                     self._error = "; ".join(
-                        part for part in (self._error, f"HDF5 close: {type(exc).__name__}: {exc}")
+                        part for part in (
+                            self._error, f"{self._label} close: {type(exc).__name__}: {exc}",
+                        )
                         if part
                     )
             self._ready.set()
@@ -478,7 +537,13 @@ class ScopeSumRecorder:
 
 
 def read_sum_capture(path: Path) -> Iterator[ScopeSumPacket]:
-    """Reopen a sum recording; validate raw and decoded columns independently."""
+    """Reopen a sum recording (HDF5 or NSUM binary) and validate continuity.
+
+    HDF5 files also check the stored decoded columns against the raw packets.
+    """
+    if sum_file.is_binary_sum_file(path):
+        yield from _read_binary_sum_capture(path)
+        return
     with h5py.File(path, "r") as source:
         if (
             source.attrs.get("format") != "nlab-scope-sums"
@@ -502,6 +567,22 @@ def read_sum_capture(path: Path) -> Iterator[ScopeSumPacket]:
             yield packet
         if len(source["timestamps"]) != offset or len(source["sums"]) != offset:
             raise ValueError("Trailing or truncated sum record columns")
+
+
+_BINARY_READ_PACKETS = 256
+
+
+def _read_binary_sum_capture(path: Path) -> Iterator[ScopeSumPacket]:
+    layout = sum_file.read_layout(path)
+    continuity = ScopeSumContinuity()
+    with Path(path).open("rb") as handle:
+        for start in range(0, layout.packets, _BINARY_READ_PACKETS):
+            stop = min(layout.packets, start + _BINARY_READ_PACKETS)
+            data = sum_file.read_packet_bytes(handle, layout, start, stop)
+            for offset in range(0, len(data), sum_file.PACKET_BYTES):
+                packet = decode_sum_packet(data[offset:offset + sum_file.PACKET_BYTES])
+                continuity.append(packet)
+                yield packet
 
 
 class ScopeSumAnalysis:

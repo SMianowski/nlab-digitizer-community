@@ -17,7 +17,8 @@ from PySide6.QtWidgets import QPushButton
 
 from nlab.analysis import current_capture as reader
 from nlab.analysis.capture_metadata import capture_digitizer_info
-from nlab.hardware.digitizer.scope_sums import MASK64, ScopeSumWriter, decode_sum_packet
+from nlab.hardware.digitizer import scope_sum_file
+from nlab.hardware.digitizer.scope_sums import MASK64, decode_sum_packet, open_sum_writer
 from nlab.views import current_capture_dialog
 from nlab.views.current_capture_dialog import CurrentCaptureDialog
 from nlab.workers import current_capture_worker as worker_module
@@ -34,13 +35,14 @@ def capture_file(tmp_path):
         constant=None,
         configuration="",
         complete=True,
+        suffix=".h5",
     ):
-        path = tmp_path / f"capture-{len(list(tmp_path.iterdir()))}.h5"
+        path = tmp_path / f"capture-{len(list(tmp_path.iterdir()))}{suffix}"
         capacity = 508 if version == 124 else 254
         means = (np.arange(count) % 101 - 50).astype(float)
         if constant is not None:
             means[:] = constant
-        writer = ScopeSumWriter(path, {"channel": 1, "configuration_yaml": configuration})
+        writer = open_sum_writer(path, {"channel": 1, "configuration_yaml": configuration})
         try:
             for row in range(0, count, capacity):
                 size = min(capacity, count - row)
@@ -589,3 +591,56 @@ def test_chunk_mean_reference_uses_raw_population_and_clears_on_empty_or_error(
         assert dialog.distribution.getData()[0] is None
     finally:
         dialog.close_without_prompt()
+
+
+@pytest.mark.parametrize("version", [123, 124])
+@pytest.mark.parametrize("gap_windows", [0, 3])
+def test_binary_and_hdf5_captures_browse_identically(capture_file, version, gap_windows):
+    kwargs = dict(version=version, count=2000, gap_windows=gap_windows, configuration="a: 1")
+    h5_path, _ = capture_file(**kwargs)
+    bin_path, _ = capture_file(**kwargs, suffix=".bin")
+    assert scope_sum_file.is_binary_sum_file(bin_path)
+    assert not scope_sum_file.is_binary_sum_file(h5_path)
+    hdf5 = reader.read_current_capture_info(h5_path)
+    binary = reader.read_current_capture_info(bin_path)
+    assert (hdf5.container, binary.container) == ("hdf5", "nsum")
+    for name in (
+        "metadata", "configuration_yaml", "complete", "cleanup_error", "final_missed_windows",
+        "geometry", "first_timestamp", "duration_ticks",
+    ):
+        assert getattr(binary, name) == getattr(hdf5, name), name
+    np.testing.assert_array_equal(binary.offsets, hdf5.offsets)
+    for start, width, kernel in ((0.0, 3.0, 0), (1.3, 4.7, 5), (0.0, binary.duration_us, 0)):
+        left = reader.read_current_chunk(hdf5, start, width, average_kernel=kernel)
+        right = reader.read_current_chunk(binary, start, width, average_kernel=kernel)
+        for field in (
+            "count", "mean", "std", "minimum", "maximum", "adjacent_pairs", "skipped_windows",
+        ):
+            assert getattr(right, field) == getattr(left, field), field
+        for field in ("timestamps", "values", "connect", "histogram_counts", "average_values"):
+            np.testing.assert_array_equal(getattr(right, field), getattr(left, field))
+    assert bin_path.stat().st_size < h5_path.stat().st_size
+
+
+def test_binary_capture_without_trailer_stays_readable_and_incomplete(capture_file):
+    path, _ = capture_file(count=1100, suffix=".bin")
+    complete = reader.read_current_capture_info(path)
+    data = path.read_bytes()
+    # A crash leaves no trailer and possibly half of a block.
+    path.write_bytes(data[: -scope_sum_file.PACKET_BYTES] + bytes([1]) * 100)
+    info = reader.read_current_capture_info(path)
+    assert not info.complete and info.final_missed_windows == 0
+    assert "did not close" in info.cleanup_error and "100 trailing bytes" in info.cleanup_error
+    assert info.windows == complete.windows
+    chunk = reader.read_current_chunk(info, 0.0, info.duration_us)
+    assert chunk.count == info.windows
+
+
+def test_binary_trailer_must_match_the_packets(capture_file):
+    path, _ = capture_file(count=1100, suffix=".bin")
+    data = bytearray(path.read_bytes())
+    trailer = data.rindex(b'"packets": 3')
+    data[trailer: trailer + 12] = b'"packets": 4'
+    path.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="trailer packet count"):
+        reader.read_current_capture_info(path)

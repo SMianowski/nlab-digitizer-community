@@ -853,8 +853,9 @@ out-of-sample performance or a globally optimal detector configuration.
 ## Current — monitoring overview {#current}
 
 Current monitoring starts stopped. Choose the acquisition mode, verify the
-signal-specific calibration, then Start monitor. Stop releases its worker;
+signal-specific calibration, then **Start**. Stop releases its worker;
 the numeric display and plot are rate-limited independently of acquisition.
+Labels show the essentials; hover a value or the status bar for full diagnostics.
 
 Raw values are not amperes until the appropriate zero, scale, and units have
 been established. IIR and DMA expose different signals and need separate
@@ -866,7 +867,7 @@ IIR polling reads signed FPGA input-filter output for lightweight monitoring.
 Its host polling schedule is not a hardware-time sample grid. Scope DMA reads
 complete timestamped waveforms and computes sample-weighted statistics.
 **Periodic sums** (IP123/IP124) uses this plot for [window means](#scope-sums)
-with inline HDF5 recording. Set its **Window size** and **Window gap** directly
+with inline binary or HDF5 recording. Set its **Window size** and **Window gap** directly
 in Current while stopped; the preview shows window duration and start interval.
 Stop drains the reader and restores Scope waveform settings, including frame size. The sum view reports ADC codes
 and does not apply the IIR/waveform linear calibration.
@@ -875,7 +876,7 @@ DMA owns the Scope buffer and applies its qualified periodic preset. The stopped
 view can change the DMA frame gap or Reset Scope defaults afterward. Do not start
 another Scope DMA owner on the same channel. The modes' raw scales differ.
 
-**Pause MCA, HV and temperature readbacks during capture** stops MCA
+**Pause readbacks** stops MCA
 histogram/statistics, Power Supply (HV and temperature) and Global diagnostics
 polling on every channel while this Current acquisition runs. They all share the
 board's IIO daemon with the capture; measured live, MCA polling alone lowered
@@ -888,7 +889,7 @@ sum replay never pauses anything.
 
 The saved linear calibration is `(raw - zero) * scale`. Zero removes a measured
 offset; scale converts the remaining signal to the selected physical unit.
-**Set zero from recent samples** derives an offset from recent data, so use a
+**Set zero** derives an offset from recent data, so use a
 known zero-current condition rather than an active detector signal.
 
 Changing the unit label alone is not a calibration. Validate sensor/front-end
@@ -1165,7 +1166,7 @@ with this application version and does not require an update check or network.
 
 ## Scope periodic sums {#scope-sums}
 
-Select **Current > Periodic sums > Start monitor** to use the existing Current plot. This is not a Scope
+Select **Current > Periodic sums > Start** to use the existing Current plot. This is not a Scope
 waveform trigger. Stop the channel's Scope acquisition first. **Stop and drain**
 restores the waveform trigger, pretrigger, and gap after releasing DMA.
 
@@ -1186,14 +1187,20 @@ Use **Start**, then **Stop and drain**. A healthy STOP retains accepted tail
 windows through a terminal transport timeout before closing. Review missed
 counts and errors. A poisoned DMA channel requires a board reboot.
 
-**Record HDF5 sums** creates a new versioned sum file with original packets,
-lossless uint64 columns, settings, producer/channel/clock identity, and completion
-status. Blank filenames generate `chN_current_<timestamp>.h5` in the measurement
-folder from **General Settings** on each **Start monitor**, with a numbered suffix
-if needed to avoid an existing file. Relative names use that folder; absolute
-paths keep their chosen location. Names without an extension gain `.h5`.
-**Browse...** starts in the configured folder, and missing folders are created
-in the background. If an explicitly named file already exists, **Start monitor**
+**Record** creates a new versioned sum file with the original packets, settings,
+producer/channel/clock identity, and completion status, in the **Format** chosen
+beside it. **Binary (.bin)**, the default, stores the packets exactly as received:
+about a third of the size and about ten times cheaper to write, so use it for
+windows shorter than 448 ns. **HDF5 (.h5)** also stores lossless uint64 timestamp
+and sum columns and opens in generic HDF5 tools. A binary file cut off by a crash
+stays readable up to its last whole packet and is reported incomplete. Blank
+filenames generate `chN_current_<timestamp>` with the format's extension in the
+measurement folder from **General Settings** on each **Start**, with a numbered
+suffix if needed to avoid an existing file. Relative names use that folder;
+absolute paths keep their chosen location. A `.bin`, `.h5` or `.hdf5` extension
+selects that format; other names gain the selected format's extension.
+**Browse…** starts in the configured folder, and missing folders are created
+in the background. If an explicitly named file already exists, **Start**
 asks before replacing it. **Cancel** keeps the existing recording and plot unchanged.
 File creation, writes, and final flush run on a background writer. Acquisition
 controls stay locked through **Stop and drain** until the recording is closed.

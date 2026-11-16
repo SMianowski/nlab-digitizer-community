@@ -12,6 +12,7 @@ import pytest
 from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 
+from nlab.analysis.current_capture import read_current_capture_info
 from nlab.controllers.current_monitor_controller import CurrentMonitorController
 from nlab.controllers.scope_controller import ScopeController
 from nlab.hardware.digitizer import scope_sums
@@ -56,7 +57,7 @@ class _Capture:
                 raise RuntimeError("injected capture failure")
             assert self.cancelled.wait(3)
             if path is not None:
-                writer = ScopeSumWriter(path, {
+                writer = scope_sums.open_sum_writer(path, {
                     "channel": 0, "configuration_yaml": getattr(self, "configuration_yaml", ""),
                 }, overwrite=overwrite)
                 writer.append(_packet())
@@ -97,8 +98,9 @@ def sum_save_settings(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("channel", [0, 1])
 @pytest.mark.parametrize("blank", ["", "   "])
+@pytest.mark.parametrize("file_format,extension", [(0, ".bin"), (1, ".h5")])
 def test_blank_sum_filename_generates_fresh_channel_path_on_start(
-    qtbot, monkeypatch, tmp_path, sum_save_settings, channel, blank,
+    qtbot, monkeypatch, tmp_path, sum_save_settings, channel, blank, file_format, extension,
 ):
     clock = Mock(wraps=recording_paths.time)
     clock.strftime.return_value = "20261113_140506"
@@ -110,6 +112,7 @@ def test_blank_sum_filename_generates_fresh_channel_path_on_start(
     first_contents = None
     try:
         current.ui.cbRecordSums.setChecked(True)
+        current.ui.comboSumFormat.setCurrentIndex(file_format)
         current.ui.editSumFile.setText(blank)
         assert not folder.exists()
         for suffix in ("", "_001"):
@@ -118,12 +121,11 @@ def test_blank_sum_filename_generates_fresh_channel_path_on_start(
             current.ui.btnStart.click()
             assert capture.entered.wait(1), current.status.text()
             current.stop_monitor_sync()
-            expected = folder / f"ch{channel}_current_20261113_140506{suffix}.h5"
+            expected = folder / f"ch{channel}_current_20261113_140506{suffix}{extension}"
             assert capture.output == expected and expected.is_file()
             assert current.ui.editSumFile.text() == blank
-            with h5py.File(expected, "r") as source:
-                assert source.attrs["complete"]
-            first_path = folder / f"ch{channel}_current_20261113_140506.h5"
+            assert read_current_capture_info(expected).complete
+            first_path = folder / f"ch{channel}_current_20261113_140506{extension}"
             if first_contents is None:
                 first_contents = first_path.read_bytes()
             assert first_path.read_bytes() == first_contents
@@ -135,8 +137,10 @@ def test_blank_sum_filename_generates_fresh_channel_path_on_start(
 @pytest.mark.parametrize(
     "filename,expected_name",
     [
-        ("detector", "detector.h5"),
+        ("detector", "detector.bin"),
+        ("detector.bin", "detector.bin"),
         ("detector.h5", "detector.h5"),
+        ("detector.v2", "detector.v2.bin"),
         ("detector.H5", "detector.H5"),
         ("nested/detector.hdf5", "nested/detector.hdf5"),
     ],
@@ -189,7 +193,8 @@ def test_sum_browse_starts_in_measurement_folder(
         assert dialog.call_args.args[2] == str(tmp_path / "measurements")
         assert dialog.call_args.kwargs["options"] == QFileDialog.Option.DontConfirmOverwrite
         assert current.ui.cbRecordSums.isChecked() == bool(selected)
-        assert current.ui.editSumFile.text() == (chosen + ".h5" if selected else "")
+        assert dialog.call_args.args[3].startswith("Binary sum capture (*.bin)")
+        assert current.ui.editSumFile.text() == (chosen + ".bin" if selected else "")
     finally:
         _close(device, scope, current)
 
@@ -292,10 +297,10 @@ def test_sums_use_existing_current_plot_and_restore_scope_after_stop(qtbot, monk
         assert current._curve.yData[-1] == 7
         assert current._curve.xData[-1] == 0
         assert "7 ADC codes" in current.ui.lblCurrent.text()
-        assert "sample-weighted" in current.ui.lblInterval.text()
+        assert "Sample-weighted" in current.ui.lblInterval.toolTip()
         assert current.ui.btnStop.text() == "Stop and drain"
         assert not current.ui.comboMode.isEnabled()
-        assert not current.ui.groupCalibration.isEnabled()
+        assert current.ui.groupCalibration.isHidden()  # sums are ADC codes
         assert device.scope.get_trigger_mode() == TriggerMode.PERIODIC_SUM
         assert device.scope.get_pretrigger_samples() == 0
         assert device.scope.get_frame_samples() == 256
@@ -322,6 +327,23 @@ def test_sums_use_existing_current_plot_and_restore_scope_after_stop(qtbot, monk
         assert current._sum_worker.thread is None
         assert "drained" in current.status.text()
         assert current._curve.yData[-1] == 7  # Final view remains available.
+    finally:
+        _close(device, scope, current)
+
+
+def test_sum_format_follows_a_typed_extension_and_renames_it(qtbot, monkeypatch):
+    device, scope, current, _ = _views(qtbot, monkeypatch)
+    try:
+        assert current.ui.comboSumFormat.currentText() == "Binary (.bin)"
+        current.ui.editSumFile.setText("run.h5")
+        current.ui.editSumFile.editingFinished.emit()
+        assert current.ui.comboSumFormat.currentText() == "HDF5 (.h5)"
+        current.ui.comboSumFormat.setCurrentIndex(0)
+        assert current.ui.editSumFile.text() == "run.bin"
+        current.ui.editSumFile.setText("notes")  # no known extension: left alone
+        current.ui.comboSumFormat.setCurrentIndex(1)
+        assert current.ui.editSumFile.text() == "notes"
+        assert current.configuration_settings()["sum_file_format"] == "hdf5"
     finally:
         _close(device, scope, current)
 
@@ -595,6 +617,7 @@ def test_declining_sum_overwrite_preserves_file_and_plot(
     device, scope, current, capture = _views(qtbot, monkeypatch)
     try:
         current.ui.cbRecordSums.setChecked(True)
+        current.ui.comboSumFormat.setCurrentIndex(1)  # HDF5: a bare stem gains .h5
         current.ui.editSumFile.setText(path.stem if relative else str(path))
         current._curve.setData([0, 1], [2, 3])
         trigger_mode = device.scope.get_trigger_mode()
@@ -775,8 +798,7 @@ def test_sum_timing_controls_have_native_units_and_preview(qtbot, monkeypatch, s
         spin.setValue(samples)
         current._set_dma_gap_cycles(gap)
         expected = (
-            f"Window: {samples * 0.002:.3f} us; "
-            f"start interval: {(samples * 2 + gap * 8) / 1000:.3f} us"
+            f"= {samples * 0.002:.3f} µs every {(samples * 2 + gap * 8) / 1000:.3f} µs"
         )
         assert current.ui.labelSumTiming.text() == expected
         assert current._sum_frame_samples() == samples
@@ -842,7 +864,8 @@ def test_sum_plot_breaks_at_missing_windows_including_timestamp_wrap(qtbot, monk
         expected[507] = expected[-1] = False
         np.testing.assert_array_equal(connections, expected)
         assert len(current._curve.yData) == 511
-        assert "gaps (timestamps): 2" in current.status.text()
+        assert "gaps 2" in current.status.text()
+        assert "gaps from the timestamps" in current.status.toolTip()
     finally:
         current._sum_worker = None
         _close(device, scope, current)
