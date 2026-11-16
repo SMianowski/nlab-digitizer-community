@@ -53,7 +53,9 @@ DEFAULT_PARAMETERS.update(
         "frame_samples": 128,
         "cfd_factor_raw": 13107,
         "cfd_delay_samples": 5,
-        "cfd_window_high_samples": 32,
+        # Window starts at the trigger beat (low >= pretrigger, P2).
+        "cfd_window_low_samples": 12,
+        "cfd_window_high_samples": 44,
         "crrc2_cdelay": 3,
         "crrc2_pzc_raw": 32761,
         "trapezoid_r_samples": 32,

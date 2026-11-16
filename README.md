@@ -91,7 +91,10 @@ For a first measurement, use the live viewers before enabling DMA recording.
 DMA capture (Scope waveforms, Current periodic sums and MCA list mode) runs in
 its own background process, so a busy display cannot slow the reader. If the
 application closes unexpectedly during a capture, that process still stops the
-acquisition and completes the file.
+acquisition and completes the file. **Stop** keeps receiving the frames the
+hardware had already accepted until the stream goes quiet, so a recording keeps its
+tail; data left over from an interrupted earlier session is detected and discarded
+at the start of the next one.
 Current periodic-sum HDF5 recording uses the measurement folder in General
 Settings. Leave the filename blank for `ch0_current_<timestamp>.h5` on Start,
 or enter your own name or path. Saving runs in the background and asks before

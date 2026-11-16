@@ -200,3 +200,21 @@ def test_psu_monitor_reads_back_until_stopped(qtbot: QtBot) -> None:
         assert len(readbacks) <= settled + 1
     finally:
         controller.stop_monitor_sync()
+
+
+def test_mca_defaults_start_the_cfd_window_at_the_trigger(qtbot: QtBot) -> None:
+    controller, _ = _mca(qtbot)
+    ui = controller.ui
+    # PetaLinux cde5fe1 P2: a window opening inside the pretrigger history
+    # reports false offset-0 crossings, so defaults keep low >= pretrigger.
+    assert ui.spinCfdTwLow.value() >= ui.spinPretrigger.value()
+    ui.cbCfdEnable.setChecked(True)
+    assert "Starts before the trigger" not in ui.spinCfdTwLow.toolTip()
+
+    ui.spinCfdTwLow.setValue(0)
+    assert "Starts before the trigger" in ui.spinCfdTwLow.toolTip()
+    assert ui.spinCfdTwLow.styleSheet()
+
+    ui.cbCfdEnable.setChecked(False)  # CFD off: the window does not matter
+    assert "Starts before the trigger" not in ui.spinCfdTwLow.toolTip()
+    assert not ui.spinCfdTwLow.styleSheet()

@@ -96,6 +96,16 @@ Additional rules:
   waveform samples/decimation; never route it into waveform consumers or NDMA v1.
 - Healthy sum STOP drains through a terminal timeout with pending/invalid status
   clear before close. Poison requires reboot, not recovery acknowledgement.
+- STOP closes admission only (PetaLinux `cde5fe1` user-api.md "STOP semantics").
+  Waveform Scope and list mode keep their reader after `enable=0` until no frame
+  has arrived for a bounded idle interval and publish that tail; never cancel a
+  reader on a fixed short grace. Keep every transport timeout longer than the idle
+  interval, or a timeout ends the drain early.
+- Data left in the cores by an undrained close reaches the next session (X2). Scope
+  discards frames that complete before its `enable=1`; list mode discards frames
+  before the session's START record (zero payload, timestamp 1) and fails continuity
+  when START is not record 0. `list_deadtime_raw` survives arm/START (L2): judge loss
+  against the value read before arm.
 - Current MCA list mode transports one unchanged 16 KiB frame containing 1024 opaque
   16-byte records. Keep the IIO record layout distinct from the same-sized legacy NDMA
   v1 event record and preserve the NDMA version distinction.

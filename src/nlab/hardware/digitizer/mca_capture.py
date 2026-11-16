@@ -92,9 +92,16 @@ class McaRunSummary:
         ]
         detail = f"{label}: {self.records:,} records, {self.rate_hz:,.0f}/s avg"
         dropped = int(str(self.diagnostics.get("list_deadtime_raw", 0)))
+        before = self.diagnostics.get("list_deadtime_before_raw")
         fault = int(str(self.diagnostics.get("dma_fault", 0)))
-        if dropped:
+        if dropped and before is not None and dropped == int(str(before)):
+            # Carried over from an earlier session (L2), not lost in this one.
+            detail += f"; earlier-session loss counter {dropped:,}"
+        elif dropped:
             detail += f"; {dropped:,} dropped"
+        stale = int(str(self.diagnostics.get("stale_frames_discarded", 0) or 0))
+        if stale:
+            detail += f"; {stale} stale frame(s) from an earlier session discarded"
         if fault:
             detail += f"; DMA fault {fault}"
         completed = self.diagnostics.get("completed_frames")

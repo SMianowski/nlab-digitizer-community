@@ -32,9 +32,11 @@ def waveform_record(index: int) -> bytes:
 class FakeWaveformBackend:
     """Delivers ``limit`` frames, then blocks until stopped (like a quiet trigger)."""
 
-    def __init__(self, limit: int) -> None:
+    def __init__(self, limit: int, tail: int = 0) -> None:
         self.limit = limit
         self.sent = 0
+        self.tail = tail  # frames still accepted after STOP, handed over at close
+        self.tail_delivered = False
         self.stopped = threading.Event()
 
     def prepare_dma_capture(self) -> None:
@@ -56,8 +58,11 @@ class FakeWaveformBackend:
     def request_dma_stop(self) -> None:
         self.stopped.set()
 
-    def close_dma_capture(self) -> None:
-        pass
+    def close_dma_capture(self, on_frame: Any = None) -> None:
+        if on_frame is not None:
+            for index in range(self.tail):
+                on_frame(waveform_record(self.sent + index))
+            self.tail_delivered = True
 
     def get_scope_dma_runtime_metadata(self) -> dict[str, object]:
         return {"transport": "fixture", "kernel_buffers": 4, "readbuf_batch_frames": 64}

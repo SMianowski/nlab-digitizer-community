@@ -36,6 +36,10 @@ class DmaReaderActiveError(RuntimeError):
     """A native reader still owns its buffer and context after cancellation."""
 
 
+class ScopeTailConsumerError(RuntimeError):
+    """A consumer rejected a drained Scope tail frame; not a DMA fault."""
+
+
 # Registers genuinely do not exist in the MCA driver sources (checked
 # against every #define/PP_F_* in vdpp-pulse-processor.c and every attribute
 # in vdpp-input-filter.c) -- these methods stay stubbed rather than guessing
@@ -151,11 +155,21 @@ _PP_HISTOGRAM_CHUNK_NAMES = tuple(
 # the wire when the caller passes the wrong number of coefficients.
 _INPUT_FILTER_FIR_COEFFICIENTS = 12
 
-# Matches the reference stub's (scope_backend_iio.py) DMA_CLOSE_DRAIN_SECONDS /
-# DMA_CLOSE_JOIN_SECONDS. Our own close path was missing this drain step
-# entirely (see _drain_for_close()'s docstring) -- ported from the stub once
-# that gap was identified by comparing against it directly.
-_DMA_CLOSE_DRAIN_SECONDS = 0.050
+# STOP closes admission only: frames already accepted (several on IP124
+# mode 4) still arrive after enable=0 and must be received before close, or
+# they reach the next session (PetaLinux cde5fe1 user-api.md "STOP
+# semantics" and "Stream carry-over between sessions", X2). Like the
+# reference backend, drain until no frame has arrived for the idle interval,
+# bounded overall; formerly a fixed 50 ms grace followed by cancel. Both
+# transports time out later than the idle interval (iiod 3 s, sum 2 s), so a
+# timeout cannot end the drain early (REV03).
+_SCOPE_CLOSE_IDLE_SECONDS = 0.25
+_SCOPE_CLOSE_DRAIN_MAX_SECONDS = 10.0
+_SCOPE_CLOSE_POLL_SECONDS = 0.02
+# Frames completing before this session's enable=1 belong to an earlier one
+# (rule 3). Stale frames are queued at arm, so they arrive within this
+# window; enable is written only after it, so no new frame can be in it.
+_SCOPE_PRE_START_SETTLE_SECONDS = 0.05
 _DMA_CLOSE_JOIN_SECONDS = 1.0
 # Matches the reference stub's DMA_CLOSE_RELEASE_SECONDS /
 # DMA_CLOSE_RELEASE_POLL_SECONDS -- 3 seconds per user-api.md's cleanup
@@ -435,6 +449,12 @@ class IIODigitizerBackend(DigitizerBackend):
         self._dma_capture_kernel_buffers: int | None = None
         self._dma_capture_geometry: ScopeDmaGeometry | ScopeSumGeometry | None = None
         self._dma_last_timestamp: int | None = None
+        # Scope STOP watchdog state, see request_dma_stop().
+        self._scope_stop_lock = threading.Lock()
+        self._scope_stop_timer: threading.Timer | None = None
+        self._dma_refill_since: float | None = None
+        self._dma_buf_cancelled = False
+        self._dma_stale_frames_discarded = 0
         # Set by IIOScopeDmaWorker.stop() through the streamer. Buffer.cancel()
         # is the libiio-supported way to interrupt a refill blocked in another
         # thread; this event lets that expected cancellation be distinguished
@@ -760,33 +780,40 @@ class IIODigitizerBackend(DigitizerBackend):
             )
         setattr(self, attribute, None)
 
-    def _drain_for_close(self, buf: iio.Buffer | IiodScopeStream) -> int:
-        """Keep refilling *buf* for a short window before cancelling it,
-        instead of cancelling immediately.
+    def _drain_for_close(
+        self,
+        buf: iio.Buffer | IiodScopeStream,
+        on_frame: Callable[[bytes], None] | None = None,
+    ) -> int:
+        """Receive the tail after STOP until the stream has gone idle.
 
-        Ported from the reference stub's (scope_backend_iio.py)
-        _drain_for_close(). If a frame the core already started sending is
-        not consumed before the DMA receiver disappears, the core can be left
-        blocked in its AXI send state -- not just for DMA, but for the shared
-        state machine that viewer-only frames also depend on to return idle.
+        STOP (enable=0) only closes admission; already accepted frames still
+        arrive (PetaLinux cde5fe1 user-api.md "STOP semantics"). A frame not
+        consumed before the receiver disappears is stranded in the core and
+        delivered to the next armed session (X2), and can leave the core
+        blocked in its AXI send state.
 
-        A background thread keeps calling refill() (discarding the
-        result -- this is drain, not read) until cancelled, while this
-        thread sleeps DMA_CLOSE_DRAIN_SECONDS to give one already-in-
-        flight frame time to land. cancel() then unblocks the worker's
-        final blocking refill() the same way it always has. Returns the
-        number of frames drained (0 or 1 in the common case).
+        A background thread keeps refilling while this thread waits until no
+        frame has arrived for _SCOPE_CLOSE_IDLE_SECONDS, bounded by
+        _SCOPE_CLOSE_DRAIN_MAX_SECONDS (exceeding it is an error: the drain
+        is incomplete). cancel() then unblocks the final blocking refill.
+        Each tail frame is validated like a capture frame and passed to
+        *on_frame*; without one it is discarded. A failing *on_frame* stops
+        the drain and is reported after cleanup without latching a DMA
+        fault. Returns the number of frames drained.
         """
         stop = threading.Event()
         entered = threading.Event()
         errors: list[tuple[int, str]] = []
+        consumer_errors: list[str] = []
         drained: list[None] = []
+        last_frame = [time.monotonic()]
 
         def refill_until_cancelled() -> None:
             entered.set()
             while not stop.is_set():
                 try:
-                    self._refill_scope_buffer(buf)
+                    nbytes = self._refill_scope_buffer(buf)
                 except Exception as exc:
                     # cancel() is expected to interrupt the final blocking
                     # refill -- either this drain's own cancel after the
@@ -805,7 +832,21 @@ class IIODigitizerBackend(DigitizerBackend):
                     if not (cancelled and expected):
                         errors.append((getattr(exc, "errno", None) or errno.EIO, str(exc)))
                     return
+                last_frame[0] = time.monotonic()
                 drained.append(None)
+                if on_frame is None:
+                    continue
+                try:
+                    raw = self._validated_tail_frame(buf, nbytes)
+                except OSError as exc:
+                    errors.append((exc.errno or errno.EIO, str(exc)))
+                    return
+                try:
+                    on_frame(raw)
+                except Exception as exc:
+                    # Scalar data only; the traceback would pin this buffer.
+                    consumer_errors.append(f"{type(exc).__name__}: {exc}")
+                    return
 
         worker = threading.Thread(
             target=refill_until_cancelled,
@@ -814,10 +855,24 @@ class IIODigitizerBackend(DigitizerBackend):
         )
         self._scope_dma_reader = worker
         worker.start()
+        started = time.monotonic()
         try:
             if not entered.wait(_DMA_CLOSE_JOIN_SECONDS):
                 raise RuntimeError("Scope DMA drain reader did not enter refill")
-            time.sleep(_DMA_CLOSE_DRAIN_SECONDS)
+            last_frame[0] = max(last_frame[0], started)
+            while worker.is_alive():
+                now = time.monotonic()
+                idle = now - last_frame[0]
+                if idle >= _SCOPE_CLOSE_IDLE_SECONDS:
+                    break
+                if now - started >= _SCOPE_CLOSE_DRAIN_MAX_SECONDS:
+                    errors.append((
+                        errno.ETIMEDOUT,
+                        "DMA drain incomplete: frames still arriving after "
+                        f"{_SCOPE_CLOSE_DRAIN_MAX_SECONDS:.0f} s",
+                    ))
+                    break
+                worker.join(min(_SCOPE_CLOSE_POLL_SECONDS, _SCOPE_CLOSE_IDLE_SECONDS - idle))
         finally:
             stop.set()
             try:
@@ -826,13 +881,37 @@ class IIODigitizerBackend(DigitizerBackend):
                 self._join_dma_reader("_scope_dma_reader", _DMA_CLOSE_JOIN_SECONDS)
         if errors:
             raise OSError(*errors[0]) from None
+        if consumer_errors:
+            raise ScopeTailConsumerError(consumer_errors[0])
         log.debug(
-            "IIO backend ch%d: DMA close-drain consumed %d frame(s)",
+            "IIO backend ch%d: DMA close-drain received %d tail frame(s)",
             self._ch, len(drained),
         )
         return len(drained)
 
-    def _close_dma_buffer(self, *, drain: bool = True) -> None:
+    def _validated_tail_frame(self, buf: iio.Buffer | IiodScopeStream, nbytes: int) -> bytes:
+        """Copy and check one drained frame like _refill_dma_buffer() does."""
+        n = self._dma_buf_frame_samples
+        if n is None or nbytes != n * np.dtype("<i2").itemsize:
+            raise OSError(errno.EIO, f"scope DMA tail frame has {nbytes} bytes")
+        if isinstance(buf, IiodScopeStream):
+            raw = buf.read()
+        else:
+            raw = ctypes.string_at(iio._buffer_start(buf._buffer), nbytes)
+        timestamp = int.from_bytes(raw[:8], "little")
+        previous = getattr(self, "_dma_last_timestamp", None)
+        if not timestamp or (previous is not None and timestamp <= previous):
+            raise OSError(errno.EIO, "scope DMA tail frame has a stale timestamp")
+        self._dma_last_timestamp = timestamp
+        return raw
+
+    def _close_dma_buffer(
+        self,
+        *,
+        drain: bool = True,
+        on_frame: Callable[[bytes], None] | None = None,
+    ) -> None:
+        self._cancel_scope_stop_watchdog()
         buf = self._dma_buf
         if buf is None:
             return
@@ -869,11 +948,20 @@ class IIODigitizerBackend(DigitizerBackend):
                 self._join_dma_reader("_scope_dma_reader", _DMA_CLOSE_JOIN_SECONDS)
             drain = False
 
+        if getattr(self, "_dma_buf_cancelled", False):
+            # The stop watchdog cancelled a refill that waited a full idle
+            # interval without a frame: the tail is already drained, and a
+            # cancelled buffer cannot be refilled.
+            drain = False
+
+        consumer_error: ScopeTailConsumerError | None = None
         if drain and not isinstance(getattr(self, "_dma_capture_geometry", None), ScopeSumGeometry):
             try:
-                self._drain_for_close(buf)
+                self._drain_for_close(buf, on_frame)
             except DmaReaderActiveError:
                 raise
+            except ScopeTailConsumerError as exc:
+                consumer_error = exc
             except Exception as exc:
                 errors.append((getattr(exc, "errno", None) or errno.EIO, f"Drain: {exc}"))
         else:
@@ -886,6 +974,7 @@ class IIODigitizerBackend(DigitizerBackend):
                 errors.append((getattr(exc, "errno", None) or errno.EIO, f"Cancel: {exc}"))
 
         self._dma_buf = None
+        self._dma_buf_cancelled = False
         self._dma_buf_frame_samples = None
         self._dma_capture_geometry = None
         if isinstance(buf, IiodScopeStream):
@@ -917,6 +1006,8 @@ class IIODigitizerBackend(DigitizerBackend):
             self._dma_fault_latched = True
             raise OSError(errors[0][0], "; ".join(message for _, message in errors))
         log.debug("IIO backend ch%d: DMA gate released after close", self._ch)
+        if consumer_error is not None:
+            raise consumer_error
 
     def _wait_for_dma_release(self) -> None:
         """Wait for target-side buffer destruction to release the DMA gate.
@@ -943,15 +1034,18 @@ class IIODigitizerBackend(DigitizerBackend):
                 )
             time.sleep(_DMA_CLOSE_RELEASE_POLL_SECONDS)
 
-    def close_dma_capture(self) -> None:
+    def close_dma_capture(self, on_frame: Callable[[bytes], None] | None = None) -> None:
         """Public wrapper over _close_dma_buffer(), for callers outside
         this class (IIOScopeDmaStreamer in dma.py) that need to disarm
         DMA capture without going through read_dma_frame()/
         capture_to_file(). Per vdpp-scope.c's postenable()/predisable():
         closing the buffer is what clears ENABLE and DMA_ENABLE for the
         DMA case -- there is no separate "stop DMA" step.
+
+        After a healthy STOP, *on_frame* receives each validated tail frame
+        drained before close; see _drain_for_close().
         """
-        self._close_dma_buffer()
+        self._close_dma_buffer(on_frame=on_frame)
 
     def prepare_dma_capture(self) -> None:
         """Begin a new streamer session only from a fully released state."""
@@ -966,6 +1060,8 @@ class IIODigitizerBackend(DigitizerBackend):
             raise RuntimeError("Scope DMA is poisoned; reboot the target before reuse")
         self._wait_for_dma_release()
         self._sum_draining = False
+        self._dma_buf_cancelled = False
+        self._dma_stale_frames_discarded = 0
         self._dma_stop_requested.clear()
 
     def get_scope_trigger_modes(self) -> tuple[int, ...]:
@@ -1014,12 +1110,14 @@ class IIODigitizerBackend(DigitizerBackend):
             raise RuntimeError("Scope DMA poisoned during teardown; reboot required")
 
     def request_dma_stop(self) -> None:
-        """Stop acquisition and interrupt a possibly blocked DMA refill.
+        """Stop acquisition without cancelling the reader that owns the tail.
 
         Called from the controller thread. ``enable=0`` uses the normal
-        control context, while Buffer.cancel() is explicitly designed to
-        interrupt a refill running in the DMA worker thread. A short grace
-        interval lets an already-completing frame return normally first.
+        control context. The worker then leaves its loop and close drains the
+        accepted tail. A worker blocked in a refill with no frame coming is
+        released by a watchdog that cancels it only once that refill has
+        waited a full idle interval, the same rule as the close drain and the
+        list-mode stop.
         """
         self._dma_stop_requested.set()
         try:
@@ -1031,10 +1129,57 @@ class IIODigitizerBackend(DigitizerBackend):
                 self._ch,
                 exc_info=True,
             )
-        time.sleep(_DMA_CLOSE_DRAIN_SECONDS)
-        buf = self._dma_buf
-        if buf is not None:
-            buf.cancel()
+        with self._scope_stop_lock:
+            if self._dma_buf is None or self._scope_stop_timer is not None:
+                return
+            self._schedule_scope_stop_watchdog(_SCOPE_CLOSE_IDLE_SECONDS)
+
+    def _schedule_scope_stop_watchdog(self, delay: float) -> None:
+        """Cancel a refill only once it has waited a full idle interval.
+
+        Caller holds ``_scope_stop_lock``. The interval counts from the start
+        of the refill that is currently blocked; a worker busy outside refill
+        reaches close, which cancels this watchdog before draining.
+        """
+        timer: threading.Timer
+
+        def check_idle_refill() -> None:
+            with self._scope_stop_lock:
+                if self._scope_stop_timer is not timer:
+                    return
+                self._scope_stop_timer = None
+                buf = self._dma_buf
+                if buf is None:
+                    return
+                since = self._dma_refill_since
+                waited = 0.0 if since is None else time.monotonic() - since
+                if since is None or waited < _SCOPE_CLOSE_IDLE_SECONDS:
+                    self._schedule_scope_stop_watchdog(
+                        max(_SCOPE_CLOSE_POLL_SECONDS, _SCOPE_CLOSE_IDLE_SECONDS - waited)
+                    )
+                    return
+                log.debug(
+                    "IIO backend ch%d: stop requested and no frame for %.2f s; "
+                    "cancelling the blocked refill", self._ch, waited,
+                )
+                self._dma_buf_cancelled = True
+                buf.cancel()
+
+        timer = threading.Timer(delay, check_idle_refill)
+        timer.daemon = True
+        self._scope_stop_timer = timer
+        timer.start()
+
+    def _cancel_scope_stop_watchdog(self) -> None:
+        # Always under the lock: a watchdog already cancelling the buffer
+        # finishes first, so close then sees _dma_buf_cancelled.
+        lock = getattr(self, "_scope_stop_lock", None)
+        if lock is None:  # backend built without __init__ (tests)
+            return
+        with lock:
+            timer, self._scope_stop_timer = self._scope_stop_timer, None
+        if timer is not None:
+            timer.cancel()
 
     def adopt_scope_dma_session_state(self, fault_latched: bool | None) -> None:
         """Mirror a Scope reader process's final latch into this backend.
@@ -1970,6 +2115,10 @@ class IIODigitizerBackend(DigitizerBackend):
         self._mca_dma_cancel_timer = timer
         timer.start()
 
+    def get_mca_dma_deadtime_baseline(self) -> int:
+        """list_deadtime_raw before arm; the counter survives arm/START (L2)."""
+        return int(self._lm_status_attr_get("list_deadtime_raw"))
+
     def get_mca_dma_capture_diagnostics(self) -> tuple[int, int, int, int]:
         """Return DMA fault/error/frame/deadtime diagnostics after close.
 
@@ -2594,6 +2743,7 @@ class IIODigitizerBackend(DigitizerBackend):
         refill_failed = False
         failure_errno: int | None = None
         failure_text = ""
+        self._dma_refill_since = time.monotonic()
         try:
             nbytes = self._refill_once(buf, first)
         except OSError as exc:
@@ -2603,6 +2753,8 @@ class IIODigitizerBackend(DigitizerBackend):
             refill_failed = True
             failure_errno = exc.errno
             failure_text = str(exc)
+        finally:
+            self._dma_refill_since = None
 
         if refill_failed:
             server_timeout = not batched_iiod or getattr(buf, "server_timed_out", False)
@@ -2749,13 +2901,22 @@ class IIODigitizerBackend(DigitizerBackend):
         back here.
         """
         entered = threading.Event()
+        enabling = threading.Event()
         result: list[int] = []
         errors: list[tuple[int, str]] = []
+        stale: list[None] = []
 
         def reader() -> None:
             entered.set()
             try:
-                result.append(self._refill_scope_buffer(buf))
+                while True:
+                    nbytes = self._refill_scope_buffer(buf)
+                    if enabling.is_set():
+                        result.append(nbytes)
+                        return
+                    # Completed before this session's enable=1 was issued:
+                    # left over from an earlier session (X2 rule 3).
+                    stale.append(None)
             except BaseException as exc:
                 errors.append((getattr(exc, "errno", None) or errno.EIO, str(exc)))
 
@@ -2776,13 +2937,18 @@ class IIODigitizerBackend(DigitizerBackend):
             )
 
         try:
+            already_enabled = self._dma_get_enable()
+            if not already_enabled:
+                # enable=0: anything arriving now was queued before this arm.
+                time.sleep(_SCOPE_PRE_START_SETTLE_SECONDS)
             sum_cancelled = (
                 isinstance(getattr(self, "_dma_capture_geometry", None), ScopeSumGeometry)
                 and getattr(self, "_sum_draining", False)
             )
             if self._dma_stop_requested.is_set() or sum_cancelled:
                 raise InterruptedError(errno.ECANCELED, "scope DMA stop requested before enable")
-            if not self._dma_get_enable():
+            enabling.set()
+            if not already_enabled:
                 self._dma_set_enable(True)
         except BaseException as primary:
             try:
@@ -2795,6 +2961,12 @@ class IIODigitizerBackend(DigitizerBackend):
             raise
         thread.join()
         self._scope_dma_reader = None
+        if stale:
+            self._dma_stale_frames_discarded = len(stale)
+            log.warning(
+                "IIO backend ch%d: discarded %d Scope DMA frame(s) that completed "
+                "before this session's START", self._ch, len(stale),
+            )
         if errors:
             raise OSError(*errors[0]) from None
         return result[0]
@@ -3439,14 +3611,16 @@ class IIODigitizerBackend(DigitizerBackend):
 
     @staticmethod
     def _encode_temperature_coefficient(value: float, scale: float) -> int:
-        """Encode the driver's signed 16-bit scaled value, rejecting overflow.
+        """Encode the driver's scaled raw value, rejecting out-of-range input.
 
-        vdpp-input-filter.c accepts s16 raw values with scale 2^-15. Validate
-        physical bounds before rounding so +1.0 cannot become raw +32768.
+        vdpp-input-filter.c accepts raw -16384..16383 with scale 2^-15 since
+        PetaLinux d7b19a8 (F1: the HLS gain 0.5 - c must stay in (0, 1];
+        16384 zeroes the signal and larger codes invert it, ERANGE outside).
+        Validate physical bounds before rounding so the edge cannot round out.
         """
         if not math.isfinite(scale) or scale <= 0:
             raise ValueError("temperature coefficient scale must be finite and positive")
-        minimum, maximum = -32768 * scale, 32767 * scale
+        minimum, maximum = -16384 * scale, 16383 * scale
         if not math.isfinite(value) or not minimum <= value <= maximum:
             raise ValueError(
                 f"temperature coefficient {value} out of range [{minimum}, {maximum}]"

@@ -54,7 +54,7 @@ class _IIOScopeBackend(ScopeSumBackend, Protocol):
 
     def request_dma_stop(self) -> None: ...
 
-    def close_dma_capture(self) -> None: ...
+    def close_dma_capture(self, on_frame: Callable[[bytes], None] | None = None) -> None: ...
 
 
 class _IIOMcaBackend(Protocol):
@@ -124,6 +124,99 @@ _EVENT_DTYPE = np.dtype(
 
 # Preserve the historical private name for callers of the NDMA v2 reader.
 _LM_EVENT_DTYPE = IIO_LM_EVENT_DTYPE
+
+# The first record of a clean list-mode measurement is the synthetic START
+# record: marker/payload zero, timestamp 1. Records that precede it are left
+# over from an earlier session whose tail was not drained (PetaLinux cde5fe1
+# user-api.md "Stream carry-over between sessions", rule 2; confirmed live on
+# .134 and .128). The bytes are the producer's, independent of client schema.
+_LM_START_RECORD = bytes(8) + (1).to_bytes(8, "little")
+# Carry-over is bounded by the external 2048-record FIFO plus in-flight
+# blocks (.134 delivered two stale frames). If no START arrives within this
+# many frames the held frames are kept, not discarded, and flagged.
+_LM_START_SEARCH_FRAMES = 4
+
+
+class ListModeStartGate:
+    """Drop whole frames that precede the session's START record.
+
+    Frames stay unchanged 16 KiB blocks. A START record later than record 0
+    of its frame means that frame is partly stale (the producer's frame
+    position carried over); it is delivered unchanged but reported, because
+    trimming would break the complete-frame transport.
+    """
+
+    def __init__(self, deliver: Callable[[np.ndarray], None]) -> None:
+        self._deliver = deliver
+        self._held: list[np.ndarray] = []
+        self.stale_frames = 0
+        # None while searching; record index of START in its frame once found.
+        self.start_index: int | None = None
+        self.missing = False
+
+    @property
+    def searching(self) -> bool:
+        return self.start_index is None and not self.missing
+
+    def offer(self, frame: np.ndarray) -> None:
+        if not self.searching:
+            self._deliver(frame)
+            return
+        index = _start_record_index(frame)
+        if index is None:
+            self._held.append(frame)
+            if len(self._held) >= _LM_START_SEARCH_FRAMES:
+                self.finish()
+            return
+        self.stale_frames = len(self._held)
+        self._held.clear()
+        self.start_index = index
+        self._deliver(frame)
+
+    def finish(self) -> None:
+        """Release held frames when the session ended or START never came."""
+        if not self.searching:
+            return
+        if not self._held:
+            return  # no frame at all; nothing to judge
+        self.missing = True
+        held, self._held = self._held, []
+        for frame in held:
+            self._deliver(frame)
+
+    def diagnostics(self) -> dict[str, object]:
+        if self.start_index == 0:
+            state = "first"
+        elif self.start_index is not None:
+            state = "misaligned"
+        else:
+            state = "missing" if self.missing else "none"
+        return {
+            "start_record": state,
+            "start_record_index": self.start_index,
+            "stale_frames_discarded": self.stale_frames,
+        }
+
+    def problem(self) -> str | None:
+        """Why this session's first records cannot be trusted, if they can't."""
+        if self.start_index is not None and self.start_index > 0:
+            return (
+                f"the session's START record is record {self.start_index} of its "
+                "first frame; the records before it are left over from an earlier "
+                "undrained session"
+            )
+        if self.missing:
+            return (
+                "no START record arrived in the session's first frames; they may "
+                "be left over from an earlier undrained session"
+            )
+        return None
+
+
+def _start_record_index(frame: np.ndarray) -> int | None:
+    raw = np.frombuffer(frame.tobytes(), dtype="V16")
+    hits = np.flatnonzero(raw == np.frombuffer(_LM_START_RECORD, dtype="V16")[0])
+    return int(hits[0]) if len(hits) else None
 
 
 @dataclass(frozen=True)
@@ -396,6 +489,19 @@ class McaEventBuffer:
             return batches, self._dropped_records
 
 
+def _list_mode_loss(deadtime_after: int, deadtime_before: int | None) -> bool:
+    """Whether list_deadtime_raw shows producer loss during this session.
+
+    The counter survives arm and START and clears only at the first record
+    after a completed end frame (L2), so an unchanged nonzero value carried in
+    from an earlier session is not this session's loss, and a value cleared
+    to zero is no loss. Without a baseline, any nonzero value counts.
+    """
+    if deadtime_after == 0:
+        return False
+    return deadtime_before is None or deadtime_after != deadtime_before
+
+
 def _append_mca_event_batch(
     target: McaEventBuffer | tuple[list[np.ndarray], threading.Lock],
     events: np.ndarray,
@@ -461,6 +567,8 @@ def _write_iio_mca_metadata(
     completed_frames: int,
     deadtime_records: int,
     client_record_schema: str,
+    deadtime_before: int | None = None,
+    stale_frames: int = 0,
     final_status: dict[str, object] | None = None,
     identity: dict[str, int | str] | None = None,
     capture_sha256: str | None = None,
@@ -471,7 +579,11 @@ def _write_iio_mca_metadata(
     wrote; without it (e.g. after a writer failure) the file is re-read.
     """
     metadata_path = path.with_suffix(".json")
-    continuity_valid = dma_fault == 0 and completed_frames == frame_count and deadtime_records == 0
+    continuity_valid = (
+        dma_fault == 0
+        and completed_frames == frame_count + stale_frames
+        and not _list_mode_loss(deadtime_records, deadtime_before)
+    )
     metadata = {
         "format": "nlab-iio-mca-ndma-v2",
         "capture": str(path.resolve()),
@@ -494,6 +606,8 @@ def _write_iio_mca_metadata(
         "driver_dma_fault": dma_fault,
         "driver_dma_error_count": dma_error_count,
         "list_deadtime_raw": deadtime_records,
+        "list_deadtime_before_raw": deadtime_before,
+        "stale_frames_discarded": stale_frames,
         "continuity_valid": continuity_valid,
     }
     if final_status is not None:
@@ -741,6 +855,70 @@ class IIOScopeDmaStreamer:
             writer_thread.join()
 
         accumulator_error = False
+
+        def deliver(record: bytes) -> None:
+            """Publish one complete frame to every consumer, in order."""
+            nonlocal frame_count, accumulator_error
+            raise_writer_error()
+            if len(record) != expected_frame_bytes:
+                if current_accumulator is not None:
+                    current_accumulator.note_rejected_frame()
+                    accumulator_error = True
+                raise RuntimeError(
+                    "scope DMA returned an incomplete raw frame: "
+                    f"{len(record)} bytes, expected {expected_frame_bytes}"
+                )
+
+            received_ns = time.perf_counter_ns()
+            if current_accumulator is not None:
+                try:
+                    current_accumulator.append_frame(record, geometry, received_ns)
+                except Exception:
+                    accumulator_error = True
+                    raise
+                if frame_count == 0:
+                    metadata_reader = getattr(
+                        self._backend,
+                        "get_scope_dma_runtime_metadata",
+                        None,
+                    )
+                    if callable(metadata_reader):
+                        metadata = metadata_reader()
+                        current_accumulator.update_runtime_transport(
+                            transport=str(metadata.get("transport", "unknown")),
+                            kernel_buffers=int(metadata.get("kernel_buffers", 0)),
+                            readbuf_batch_frames=int(metadata.get("readbuf_batch_frames", 0)),
+                            queued_blocks=int(metadata.get("queued_blocks", 0)),
+                            queue_high_watermark=int(metadata.get("queue_high_watermark", 0)),
+                        )
+
+            if frame_buffer is not None:
+                timestamp = int.from_bytes(record[:8], "little")
+                samples = np.frombuffer(
+                    record,
+                    dtype="<i2",
+                    count=geometry.waveform_samples,
+                    offset=SCOPE_TIMESTAMP_WORDS * 2,
+                )
+                frame_buffer.append(
+                    ScopeDmaFrame(
+                        timestamp=timestamp,
+                        received_ns=received_ns,
+                        samples=samples,
+                        geometry=geometry,
+                    )
+                )
+
+            # The backend has already copied this exact immutable frame
+            # out of the transport buffer, so no decode/repack is needed
+            # before the next refill starts.
+            if not enqueue_record(record):
+                raise RuntimeError("scope DMA writer stopped unexpectedly")
+            frame_count += 1
+            if filepath is None and on_progress is not None:
+                on_progress(frame_count * expected_frame_bytes)
+
+        healthy_stop = False
         try:
             writer_ready.wait()
             raise_writer_error()
@@ -761,63 +939,10 @@ class IIOScopeDmaStreamer:
                     if stop_event.is_set():
                         break
                     raise
-                if len(record) != expected_frame_bytes:
-                    if current_accumulator is not None:
-                        current_accumulator.note_rejected_frame()
-                        accumulator_error = True
-                    raise RuntimeError(
-                        "scope DMA returned an incomplete raw frame: "
-                        f"{len(record)} bytes, expected {expected_frame_bytes}"
-                    )
-
-                received_ns = time.perf_counter_ns()
-                if current_accumulator is not None:
-                    try:
-                        current_accumulator.append_frame(record, geometry, received_ns)
-                    except Exception:
-                        accumulator_error = True
-                        raise
-                    if frame_count == 0:
-                        metadata_reader = getattr(
-                            self._backend,
-                            "get_scope_dma_runtime_metadata",
-                            None,
-                        )
-                        if callable(metadata_reader):
-                            metadata = metadata_reader()
-                            current_accumulator.update_runtime_transport(
-                                transport=str(metadata.get("transport", "unknown")),
-                                kernel_buffers=int(metadata.get("kernel_buffers", 0)),
-                                readbuf_batch_frames=int(metadata.get("readbuf_batch_frames", 0)),
-                                queued_blocks=int(metadata.get("queued_blocks", 0)),
-                                queue_high_watermark=int(metadata.get("queue_high_watermark", 0)),
-                            )
-
-                if frame_buffer is not None:
-                    timestamp = int.from_bytes(record[:8], "little")
-                    samples = np.frombuffer(
-                        record,
-                        dtype="<i2",
-                        count=geometry.waveform_samples,
-                        offset=SCOPE_TIMESTAMP_WORDS * 2,
-                    )
-                    frame_buffer.append(
-                        ScopeDmaFrame(
-                            timestamp=timestamp,
-                            received_ns=received_ns,
-                            samples=samples,
-                            geometry=geometry,
-                        )
-                    )
-
-                # The backend has already copied this exact immutable frame
-                # out of the transport buffer, so no decode/repack is needed
-                # before the next refill starts.
-                if not enqueue_record(record):
-                    raise RuntimeError("scope DMA writer stopped unexpectedly")
-                frame_count += 1
-                if filepath is None and on_progress is not None:
-                    on_progress(frame_count * expected_frame_bytes)
+                deliver(record)
+            # A frame-count limit ends the session itself; only a STOP has an
+            # accepted tail that belongs to this capture.
+            healthy_stop = n_frames is None or frame_count < n_frames
         except Exception:
             if (
                 current_accumulator is not None
@@ -828,7 +953,11 @@ class IIOScopeDmaStreamer:
             raise
         finally:
             try:
-                self._backend.close_dma_capture()
+                # STOP closes admission only: frames already accepted keep
+                # arriving and belong to this capture (PetaLinux cde5fe1
+                # user-api.md "STOP semantics"). A failed session's tail is
+                # drained but not published.
+                self._backend.close_dma_capture(on_frame=deliver if healthy_stop else None)
             finally:
                 try:
                     finish_writer()
@@ -1165,7 +1294,7 @@ class IIOMcaDmaStreamer:
             )
             log.info("IIO MCA DMA: recording %s to %s", output_mode.value, filepath)
 
-        def consume(events: np.ndarray) -> None:
+        def deliver(events: np.ndarray) -> None:
             nonlocal total_records, frame_count
             # Assert the backend and transport agree on the v121 ABI. This
             # catches an accidental legacy-dtype reuse before corrupting a
@@ -1182,6 +1311,9 @@ class IIOMcaDmaStreamer:
             total_records += len(events)
             if on_progress is not None:
                 on_progress(total_records)
+
+        gate = ListModeStartGate(deliver)
+        consume = gate.offer
 
         failure: BaseException | None = None
         cleanup_errors: list[dict[str, int | str]] = []
@@ -1231,6 +1363,14 @@ class IIOMcaDmaStreamer:
                 })
                 failure.add_note(f"{phase}: {error}")
 
+        # list_deadtime_raw is not reset by arm or START (L2): an earlier
+        # session's value can persist. Only a change during this session is
+        # this session's loss (PetaLinux cde5fe1 user-api.md, list mode).
+        deadtime_before: int | None = None
+        baseline_reader = getattr(self._backend, "get_mca_dma_deadtime_baseline", None)
+        if callable(baseline_reader):
+            deadtime_before = int(baseline_reader())
+
         try:
             # Backend readiness is a hardware lifecycle boundary, not merely
             # worker-thread startup: arm all kernel blocks, enter the
@@ -1271,6 +1411,10 @@ class IIOMcaDmaStreamer:
                 )
         except BaseException as exc:
             retain_failure("DMA close", exc)
+        try:
+            gate.finish()
+        except BaseException as exc:
+            retain_failure("Capture", exc)
 
         dma_fault = dma_error_count = completed_frames = deadtime_records = 0
         diagnostics_available = False
@@ -1293,7 +1437,15 @@ class IIOMcaDmaStreamer:
             "completed_frames": completed_frames,
             "streamed_frames": frame_count,
             "list_deadtime_raw": deadtime_records,
+            "list_deadtime_before_raw": deadtime_before,
+            **gate.diagnostics(),
         }
+        if gate.stale_frames:
+            log.warning(
+                "IIO MCA DMA ch%d: discarded %d frame(s) left over from an earlier "
+                "session before this session's START record",
+                self._channel, gate.stale_frames,
+            )
         if isinstance(provenance, dict):
             self.last_capture_diagnostics.update(provenance)
         status_reader = getattr(self._backend, "get_mca_dma_capture_status", None)
@@ -1311,17 +1463,23 @@ class IIOMcaDmaStreamer:
             retain_failure("DMA fault", RuntimeError(
                 f"MCA list-mode driver latched DMA fault reason {dma_fault}; {detail}"
             ))
-        if diagnostics_available and completed_frames != frame_count and failure is None:
+        received_frames = frame_count + gate.stale_frames
+        if diagnostics_available and completed_frames != received_frames and failure is None:
             detail = (
                 "the retained capture is incomplete"
                 if writer is not None
                 else "online capture continuity is invalid"
             )
             retain_failure("Frame accounting", RuntimeError(
-                f"MCA list-mode capture contains {frame_count} complete frames, "
+                f"MCA list-mode capture received {received_frames} complete frames, "
                 f"but the driver completed {completed_frames}; {detail}"
             ))
-        if deadtime_records and failure is None:
+        start_problem = gate.problem()
+        if start_problem is not None and failure is None:
+            retain_failure("Session start", RuntimeError(
+                f"MCA list-mode continuity is invalid: {start_problem}"
+            ))
+        if _list_mode_loss(deadtime_records, deadtime_before) and failure is None:
             detail = (
                 "the capture file was retained, but continuity is invalid"
                 if writer is not None
@@ -1359,7 +1517,8 @@ class IIOMcaDmaStreamer:
                     filepath, channel=self._channel, started_utc=started_utc,
                     frame_count=frame_count, dma_fault=dma_fault,
                     dma_error_count=dma_error_count, completed_frames=completed_frames,
-                    deadtime_records=deadtime_records, client_record_schema=capture_schema,
+                    deadtime_records=deadtime_records, deadtime_before=deadtime_before,
+                    stale_frames=gate.stale_frames, client_record_schema=capture_schema,
                     final_status=status, identity=self.transport_identity(),
                     capture_sha256=writer.binary_sha256 if writer is not None else None,
                 )

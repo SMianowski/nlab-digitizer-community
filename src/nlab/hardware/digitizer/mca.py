@@ -77,8 +77,10 @@ MCA_PARAMETER_SPECS: dict[MCAParam, ParameterSpec] = {
     MCAParam.PILEUP_WINDOW: RangeSpec(min_val=0, max_val=255, step=1, default=0),
     MCAParam.TIME_LIMIT: RangeSpec(min_val=0, max_val=576460752, step=1, default=0),
     MCAParam.GLOBAL_ENABLE: ListSpec(items=(False, True), default=False),
+    # vdpp-input-filter.c (PetaLinux d7b19a8, F1) rejects raw values outside
+    # -16384..16383 with ERANGE: the HLS gain 0.5 - c must stay in (0, 1].
     MCAParam.TEMP_COEFF: RangeSpec(
-        min_val=-1.0, max_val=32767 / 32768, step=2**-15, default=-0.00026735,
+        min_val=-0.5, max_val=16383 / 32768, step=2**-15, default=-0.00026735,
     ),
     MCAParam.TEMP_OFFSET: RangeSpec(min_val=-32768, max_val=32767, step=1, default=7),
     MCAParam.TRAPEZ_ENABLE: ListSpec(items=(False, True), default=False),
@@ -97,8 +99,11 @@ MCA_PARAMETER_SPECS: dict[MCAParam, ParameterSpec] = {
     MCAParam.CRRC2_RECIPROCAL: RangeSpec(min_val=0, max_val=65535, step=1, default=0),
     MCAParam.CRRC2_FDELAY: RangeSpec(4, 508, 4, 4),
     MCAParam.CRRC2_PZC: RangeSpec(min_val=-32768, max_val=32767, step=1, default=32761),
-    MCAParam.CFD_TW_LOW: RangeSpec(0, 32764, 4, 0),
-    MCAParam.CFD_TW_HIGH: RangeSpec(0, 32764, 4, 32),
+    # The window must start at the trigger (low >= pretrigger) or a crossing
+    # in the pretrigger history locks a false offset 0 (PetaLinux cde5fe1
+    # user-api.md, P2; not enforced by the driver). Default: pretrigger 12.
+    MCAParam.CFD_TW_LOW: RangeSpec(0, 32764, 4, 12),
+    MCAParam.CFD_TW_HIGH: RangeSpec(0, 32764, 4, 44),
     MCAParam.MEM1_SIG_SELECT: ListSpec(items=MCA_DEBUG_SIGNAL_SELECTORS, default=0),
     MCAParam.MEM2_SIG_SELECT: ListSpec(items=MCA_DEBUG_SIGNAL_SELECTORS, default=1),
     MCAParam.EXT_TRIG_ENABLE: ListSpec(items=(False, True), default=False),

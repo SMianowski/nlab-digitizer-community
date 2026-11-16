@@ -73,10 +73,19 @@ def _frame(seed: int) -> np.ndarray:
     return events
 
 
+def _session_first_frame(seed: int) -> np.ndarray:
+    # A clean session's first record is the synthetic START record
+    # (zero marker/payload, timestamp 1), as delivered by the hardware.
+    events = _frame(seed)
+    events[0] = np.zeros(1, dtype=_LM_EVENT_DTYPE)[0]
+    events["timestamp"][0] = 1
+    return events
+
+
 class _FakeBackend:
     def __init__(self, stop_event: threading.Event) -> None:
         self._stop_event = stop_event
-        self.first = _frame(1)
+        self.first = _session_first_frame(1)
         self.tail = _frame(2)
         self.stop_requests = 0
         self.diagnostics = (0, 0, 2, 0)
@@ -464,6 +473,10 @@ def test_iio_streamer_writes_versioned_frames_and_preserves_tail(tmp_path: Path)
         "completed_frames": 2,
         "streamed_frames": 2,
         "list_deadtime_raw": 0,
+        "list_deadtime_before_raw": None,
+        "start_record": "first",
+        "start_record_index": 0,
+        "stale_frames_discarded": 0,
         "continuity_valid": True,
     }
 
@@ -778,3 +791,117 @@ def test_capture_metadata_records_the_kernel_block_count_the_backend_arms() -> N
 
     # Live v121 stalls of 20-50 ms emptied eight blocks; 64 absorbed them.
     assert IIO_LM_KERNEL_BUFFER_COUNT == _LM_KERNEL_BUFFER_COUNT == 64
+
+
+class _FakeCarryOverBackend(_FakeBackend):
+    """Delivers *stale* frames from an undrained session before START."""
+
+    def __init__(self, stop_event: threading.Event, stale: list[np.ndarray],
+                 session: list[np.ndarray], deadtime: tuple[int, int] = (0, 0)) -> None:
+        super().__init__(stop_event)
+        self._frames = [*stale, *session]
+        self.diagnostics = (0, 0, len(self._frames), deadtime[1])
+        self.deadtime_before = deadtime[0]
+
+    def get_mca_dma_deadtime_baseline(self) -> int:
+        return self.deadtime_before
+
+    def start_mca_dma_capture(
+        self,
+        on_started: Callable[[], None] | None = None,
+    ) -> np.ndarray:
+        if on_started is not None:
+            on_started()
+        self._stop_event.set()
+        return self._frames.pop(0)
+
+    def close_mca_dma_capture(
+        self,
+        on_frame: Callable[[np.ndarray], None] | None = None,
+    ) -> int:
+        frames, self._frames = self._frames, []
+        for frame in frames:
+            assert on_frame is not None
+            on_frame(frame)
+        return len(frames)
+
+
+def test_frames_before_the_start_record_are_discarded(tmp_path: Path) -> None:
+    stop_event = threading.Event()
+    stale = [_frame(7), _frame(8)]
+    session = [_session_first_frame(1), _frame(2)]
+    backend = _FakeCarryOverBackend(stop_event, stale, session)
+    output = tmp_path / "carry.bin"
+    streamer = IIOMcaDmaStreamer(backend, channel=0)
+
+    assert streamer.stream_events(stop_event, output) == 2 * 1024
+
+    with output.open("rb") as file:
+        file.seek(FILE_HEADER_STRUCT.size)
+        parsed = np.frombuffer(file.read(), dtype=_LM_EVENT_DTYPE)
+    np.testing.assert_array_equal(parsed, np.concatenate(session))
+    diagnostics = streamer.last_capture_diagnostics
+    assert diagnostics["stale_frames_discarded"] == 2
+    assert diagnostics["start_record"] == "first"
+    assert diagnostics["continuity_valid"] is True
+    metadata = json.loads(output.with_suffix(".json").read_text(encoding="utf-8"))
+    assert metadata["stale_frames_discarded"] == 2
+    assert metadata["driver_completed_frames"] == 4
+    assert metadata["continuity_valid"] is True
+
+
+def test_start_record_inside_the_first_frame_invalidates_continuity() -> None:
+    stop_event = threading.Event()
+    misaligned = _frame(1)
+    misaligned[6] = np.zeros(1, dtype=_LM_EVENT_DTYPE)[0]
+    misaligned["timestamp"][6] = 1
+    backend = _FakeCarryOverBackend(stop_event, [], [misaligned, _frame(2)])
+    streamer = IIOMcaDmaStreamer(backend, channel=0)
+
+    with pytest.raises(RuntimeError, match="START record is record 6"):
+        streamer.stream_events(stop_event)
+
+    diagnostics = streamer.last_capture_diagnostics
+    assert diagnostics["start_record"] == "misaligned"
+    assert diagnostics["streamed_frames"] == 2  # delivered unchanged
+    assert diagnostics["continuity_valid"] is False
+
+
+def test_missing_start_record_keeps_the_frames_and_invalidates_continuity() -> None:
+    stop_event = threading.Event()
+    backend = _FakeCarryOverBackend(stop_event, [], [_frame(1), _frame(2)])
+    events = McaEventBuffer()
+    streamer = IIOMcaDmaStreamer(backend, channel=0)
+
+    with pytest.raises(RuntimeError, match="no START record"):
+        streamer.stream_events(stop_event, event_buffer=events)
+
+    batches, _ = events.drain()
+    assert len(batches) == 2
+    assert streamer.last_capture_diagnostics["start_record"] == "missing"
+
+
+@pytest.mark.parametrize("before,after,loss", [
+    (0, 0, False),
+    (30001, 30001, False),  # carried over from an earlier session (L2)
+    (30001, 0, False),      # cleared by this session's first record
+    (30001, 30005, True),
+    (0, 7, True),
+])
+def test_deadtime_loss_is_judged_against_the_pre_arm_baseline(
+    before: int, after: int, loss: bool,
+) -> None:
+    stop_event = threading.Event()
+    backend = _FakeCarryOverBackend(
+        stop_event, [], [_session_first_frame(1)], deadtime=(before, after),
+    )
+    streamer = IIOMcaDmaStreamer(backend, channel=0)
+
+    if loss:
+        with pytest.raises(RuntimeError, match="dropped records"):
+            streamer.stream_events(stop_event)
+    else:
+        streamer.stream_events(stop_event)
+    diagnostics = streamer.last_capture_diagnostics
+    assert diagnostics["list_deadtime_before_raw"] == before
+    assert diagnostics["continuity_valid"] is (not loss)

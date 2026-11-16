@@ -275,7 +275,7 @@ def _closing_backend(
 ) -> IIODigitizerBackend:
     import nlab.hardware.digitizer.backends.iio_backend as module
 
-    monkeypatch.setattr(module, "_DMA_CLOSE_DRAIN_SECONDS", 0.05)
+    monkeypatch.setattr(module, "_SCOPE_CLOSE_IDLE_SECONDS", 0.05)
     backend = object.__new__(IIODigitizerBackend)
     backend._ch = 0
     backend._dma_buf = stream

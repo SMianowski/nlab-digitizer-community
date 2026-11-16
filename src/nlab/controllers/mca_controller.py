@@ -600,6 +600,7 @@ class MCAController(QWidget):
         self.ui.sliderCfdDelay.setValue(self._mca.filters.cfd.get_delay() * 2)
         self.ui.spinCfdTwLow.setValue(self._mca.filters.cfd.get_time_window_low() * 2)
         self.ui.spinCfdTwHigh.setValue(self._mca.filters.cfd.get_time_window_high() * 2)
+        self._update_cfd_window_warning()
 
         # Trapezoid
         self.ui.cbTrapezEnable.setChecked(self._mca.filters.trapezoid.get_enable())
@@ -1679,6 +1680,30 @@ class MCAController(QWidget):
             self._last_elapsed_s = 0.0
             self._hist_curve.setData([], [])
 
+    def _update_cfd_window_warning(self) -> None:
+        """Flag a CFD window that starts inside the pretrigger history.
+
+        The window timer counts from the first frame beat, the fine-time
+        counter from the trigger beat, so a crossing before the trigger
+        locks a false offset 0 (PetaLinux cde5fe1 user-api.md, "CFD window
+        must start at the trigger", P2). The driver deliberately does not
+        enforce low >= pretrigger, so this only warns.
+        """
+        spin = self.ui.spinCfdTwLow
+        early = (
+            self.ui.cbCfdEnable.isChecked()
+            and spin.value() < self.ui.spinPretrigger.value()
+        )
+        spin.setStyleSheet("QSpinBox { color: #d35400; }" if early else "")
+        tooltip = _MCA_CONTROL_TOOLTIPS["spinCfdTwLow"]
+        if early:
+            tooltip += (
+                "\n\nStarts before the trigger: set it to at least the pretrigger "
+                f"({self.ui.spinPretrigger.value()} ns), or crossings in the "
+                "pretrigger history are reported as offset 0."
+            )
+        spin.setToolTip(tooltip)
+
     def _connect_signals(self) -> None:
         self.ui.btnRecover.clicked.connect(self._on_acknowledge_recovery)
         self.ui.comboPulsePolarity.currentIndexChanged.connect(self._on_pulse_polarity_changed)
@@ -1781,6 +1806,12 @@ class MCAController(QWidget):
                 lambda: self._mca.filters.cfd.set_enable(value)
             )
         )
+        for signal in (
+            self.ui.cbCfdEnable.toggled,
+            self.ui.spinCfdTwLow.valueChanged,
+            self.ui.spinPretrigger.valueChanged,
+        ):
+            signal.connect(lambda *_: self._update_cfd_window_warning())
         self.ui.spinCfdFactor.editingFinished.connect(
             lambda: self._commit_hardware_setting(
                 lambda: self._mca.filters.cfd.set_factor(self.ui.spinCfdFactor.value())

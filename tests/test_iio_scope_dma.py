@@ -97,7 +97,7 @@ class _BlockingScopeBackend:
         self.stop_requests += 1
         self.release.set()
 
-    def close_dma_capture(self) -> None:
+    def close_dma_capture(self, on_frame: object = None) -> None:
         self.closed += 1
 
 

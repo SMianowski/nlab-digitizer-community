@@ -158,6 +158,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Scope waveform DMA STOP no longer strands accepted frames. STOP only closes
+  admission: frames the core already accepted (several on IP124 mode 4) keep arriving.
+  Stop used to cancel the reader 50 ms after `enable=0` and close without draining, so
+  the tail was lost and could be delivered to the next session (PetaLinux X2). Like the
+  reference backend, Stop now keeps the reader until no frame has arrived for 0.25 s
+  (at most 10 s), and the tail frames go to the file, Current accumulator and display
+  like any other frame. A reader blocked with no data is released by a watchdog only
+  after it has waited the full idle interval. Live on .128 (IP124, mode 4, frame 1024):
+  9-68 frames per Stop that were previously dropped are now kept, Stop completes in
+  ~0.31 s, and a quiet trigger stops cleanly. Frames that complete before a session's
+  `enable=1` are discarded as left over from an earlier session.
+- MCA list mode discards whole frames that precede the session's synthetic START
+  record (zero payload, timestamp 1), which belong to an earlier undrained session.
+  A START record later than the first record, or none in the first four frames, marks
+  the capture's continuity invalid instead of passing it as verified. Live on .128 the
+  START record was record 0 of the first frame in every session.
+- MCA list mode reads `list_deadtime_raw` before arming. The counter is not reset by
+  arm or START, so an earlier session's value used to fail a loss-free run, and a
+  cleared counter is not loss; only a change during the session now counts as
+  dropped records. The run summary and sidecar record both values
+  (`list_deadtime_before_raw`) and the number of discarded stale frames.
+- The MCA CFD window now defaults to 24-88 ns, starting at the default 24 ns
+  pretrigger. The window timer starts at the first (pretrigger) beat but fine time at
+  the trigger, so a window opening earlier reports crossings in the pretrigger history
+  as a false offset 0 (PetaLinux P2: 95% of CFD-valid records with the old 0-64 ns
+  default). The Low field turns orange with an explanation when CFD is enabled and it
+  starts before the pretrigger; the driver does not enforce this, so it only warns.
+- The MCA temperature coefficient written to the input filter is limited to
+  -0.5 ... 0.49997 (raw -16384 ... 16383), the range the driver accepts since
+  `d7b19a8` (F1): at 0.5 the filter gain is zero and beyond it the signal inverts.
 - Pressing Enter in a field no longer clicks a button in the Current Capture Analysis,
   Dose Calibration Logger, Timing Validation and Waveform Analysis windows (Qt's dialog
   default button had made Enter in a spin box press Open, Browse, Start CSV recording or

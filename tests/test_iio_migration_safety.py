@@ -52,7 +52,7 @@ def backend(monkeypatch):
     b._dma_fault_latched = False
     b._scope_dma_reader = None
     b._mca_dma_reader = None
-    monkeypatch.setattr(module, "_DMA_CLOSE_DRAIN_SECONDS", 0.01)
+    monkeypatch.setattr(module, "_SCOPE_CLOSE_IDLE_SECONDS", 0.01)
     monkeypatch.setattr(module, "_DMA_CLOSE_JOIN_SECONDS", 0.02)
     monkeypatch.setattr(module, "_LM_CLOSE_JOIN_SECONDS", 0.02)
     monkeypatch.setattr(module, "_MCA_STOP_STATUS_SECONDS", 0.02)

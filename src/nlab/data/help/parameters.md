@@ -334,8 +334,16 @@ The GUI passes 5..132 native ADC samples to the API; the kernel owns
 the phase encoding, so the application does not encode it again.
 
 The inclusive low/high boundaries use ns in 8 ns steps. When enabled,
-low<=high<window length and delay<window length. Low=0 ns and high=24 ns
-admit four beats, or 16 original ADC positions.
+low<=high<window length and delay<window length. A window of low=24 ns and
+high=48 ns admits four beats, or 16 original ADC positions.
+
+Start the window at the trigger: **low must be at least the pretrigger**. The
+window counts from the first beat of the frame, including the pretrigger
+history, but the fine time counts from the trigger, so a crossing inside the
+pretrigger history is reported as a false offset 0. The default window
+24-88 ns starts at the default 24 ns pretrigger. The Low field turns orange
+when CFD is enabled and the window starts earlier; the hardware does not
+enforce the rule.
 
 ## MCA — trapezoidal shaping and energy {#mca-trapezoid}
 
@@ -401,6 +409,13 @@ records independently of a display cut. Current IIO frames contain 1,024 opaque
 16-byte records; sparse sources may update slowly until a frame is ready or Stop
 drains the acquisition. Review the final status, fault counters, and continuity
 summary before treating the capture as complete.
+
+Every clean list-mode run starts with a START record. Frames that arrive before
+it are left over from an earlier, interrupted run; they are discarded and
+counted in the summary, and a run whose START record is missing or not first is
+reported as incomplete. The hardware loss counter is not reset by Start, so the
+summary counts only records dropped during this run and shows a value carried
+over from an earlier run separately.
 
 ## MCA — ROI, counts, and differential view {#mca-roi}
 

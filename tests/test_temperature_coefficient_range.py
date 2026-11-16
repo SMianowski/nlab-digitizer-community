@@ -16,7 +16,8 @@ from nlab.ui.ui_global_view import Ui_GlobalView
 from nlab.workers.temperature_correction_worker import TemperatureCorrectionWorker
 
 SCALE = 2**-15
-MAXIMUM = 32767 * SCALE
+MAXIMUM = 16383 * SCALE
+MINIMUM = -16384 * SCALE
 
 
 def _attributes(scale: float = SCALE) -> dict[str, SimpleNamespace]:
@@ -37,7 +38,7 @@ def _backend(scale: float = SCALE) -> IIODigitizerBackend:
 
 @pytest.mark.parametrize("worker", [False, True])
 @pytest.mark.parametrize("value,raw", [
-    (-1.0, -32768), (MAXIMUM, 32767), (0.0, 0), (-0.0005347, -18),
+    (MINIMUM, -16384), (MAXIMUM, 16383), (0.0, 0), (-0.0005347, -18),
 ])
 def test_signed_endpoints_and_normal_rounding(value: float, raw: int, worker: bool) -> None:
     backend = _backend()
@@ -58,7 +59,7 @@ def test_signed_endpoints_and_normal_rounding(value: float, raw: int, worker: bo
 
 @pytest.mark.parametrize("worker", [False, True])
 @pytest.mark.parametrize("value", [
-    1.0, math.nextafter(MAXIMUM, math.inf), math.nextafter(-1.0, -math.inf),
+    1.0, 0.5, -1.0, math.nextafter(MAXIMUM, math.inf), math.nextafter(MINIMUM, -math.inf),
     math.nan, math.inf, -math.inf,
 ])
 def test_invalid_applied_coefficient_never_writes_either_term(value: float, worker: bool) -> None:
@@ -102,6 +103,7 @@ def test_public_api_rejects_positive_one_before_invoking_backend(combined: bool)
     backend.set_temp_offset.assert_not_called()
     spec = MCA_PARAMETER_SPECS[MCAParam.TEMP_COEFF]
     assert spec.max_val == MAXIMUM
+    assert spec.min_val == MINIMUM
     assert spec.step == SCALE
 
 
