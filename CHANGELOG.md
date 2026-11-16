@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.9.0] — 2026-11-16
+
+Includes the client-side rules from the PetaLinux driver review of 2026-11-14/15
+(`d7b19a8`, `cde5fe1`: STOP semantics, stream carry-over X2, `list_deadtime_raw` L2,
+CFD window P2, filter coefficient F1). The new kernel patches 0006/0007 are not
+required by this client; with them, an undrained close is reported as EIO instead of
+silently delivering a misaligned block.
 
 ### Added
 
