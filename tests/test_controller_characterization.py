@@ -14,12 +14,15 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QWidget
 from pytestqt.qtbot import QtBot
 
 from nlab.controllers.mca_controller import MCAController
 from nlab.controllers.psu_controller import PSUController
-from nlab.controllers.scope_controller import ScopeController
+from nlab.controllers.scope_controller import DisplayMode, ScopeController
 from nlab.hardware.digitizer.scope import TriggerMode
+from nlab.ui.ui_scope_view import Ui_ScopeView
+from nlab.views.general_settings_dialog import GeneralSettingsDialog
 from tests._controller_harness import recording_digitizer, signal_log
 
 
@@ -64,6 +67,20 @@ def test_scope_construction_writes_hardware_defaults_and_shows_them(qtbot: QtBot
     assert controller.ui.comboTriggerMode.currentData() == backend.written("set_edge")[0]
     assert controller.ui.spinFrameSamples.value() == backend.written("set_frame_samples")[0] * 2
     assert controller.ui.spinPretrigger.value() == backend.written("set_pretrigger_samples")[0] * 2
+
+
+def test_scope_display_defaults_to_raw_without_saved_settings(qtbot: QtBot) -> None:
+    # Saved per-channel QSettings override this at construction, so check the
+    # form default and the configuration fallbacks directly.
+    view = QWidget()
+    qtbot.addWidget(view)
+    ui = Ui_ScopeView()
+    ui.setupUi(view)
+    assert ui.comboDisplayMode.currentIndex() == DisplayMode.RAW
+    assert ui.comboDisplayMode.currentText() == "Raw"
+    dialog = GeneralSettingsDialog("192.0.2.10", {})
+    qtbot.addWidget(dialog)
+    assert dialog.settings["scope_display_mode"] == DisplayMode.RAW
 
 
 def test_scope_trigger_mode_choice_is_written_to_the_backend(qtbot: QtBot) -> None:

@@ -13,6 +13,7 @@ from nlab.analysis.dose_calibration import PsuDoseCalibrationSnapshot
 from nlab.hardware.digitizer.hv import HV_PARAMETER_SPECS, HVParam, HVSupply
 from nlab.hardware.digitizer.scope import RangeSpec, choice_default, range_spec
 from nlab.ui.ui_psu_view import Ui_PSUView
+from nlab.views import theme
 from nlab.views.responsive_layout import configure_psu_layout
 from nlab.views.spec_binding import bind_double_spinbox
 from nlab.workers.base_worker import pause_requests
@@ -67,20 +68,16 @@ class PSUController(QWidget):
         self._connect_signals()
 
     def _set_sipm_controls_visible(self, visible: bool) -> None:
-        """Show the SiPM column without reserving space while it is hidden."""
+        """Show the SiPM groups; hidden groups take no space in the control column."""
         self.ui.groupSipm.setVisible(visible)
         self.ui.groupSipmCompens.setVisible(visible)
-        self.ui.columnsLayout.setStretch(0, 1 if visible else 0)
-        self.ui.columnsLayout.invalidate()
-        self._control_scroll.setMinimumHeight(300 if visible else 250)
-        self._control_scroll.setMaximumHeight(320 if visible else 250)
 
     # ------------------------------------------------------------------
     # Plot setup
     # ------------------------------------------------------------------
 
     def _setup_plot(self) -> None:
-        self.ui.plotHvVoltage.setBackground("#f8f9fa")
+        self.ui.plotHvVoltage.setBackground(theme.colors().plot_background)
         self.ui.plotHvVoltage.showGrid(x=True, y=True, alpha=0.2)
         self.ui.plotHvVoltage.setLabel("left", "HV Voltage", units="V")
         self.ui.plotHvVoltage.setLabel("bottom", "Time", units="s")

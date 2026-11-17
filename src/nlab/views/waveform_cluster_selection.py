@@ -8,6 +8,7 @@ from PySide6.QtCore import QPointF, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget
 
 from nlab.analysis.psd_selection import points_in_polygon
+from nlab.views import theme
 from nlab.views.tooltips import wrap_widget_tooltips
 
 
@@ -26,7 +27,10 @@ class WaveformClusterSelection(QWidget):
         self._roi: pg.ROI | None = None
         self._busy = False
         self._tools_visible = True
-        self._point = pg.ScatterPlotItem(size=11, pen=pg.mkPen("black"), brush="white")
+        ink = theme.colors().plot_ink
+        self._point = pg.ScatterPlotItem(
+            size=11, pen=pg.mkPen(ink), brush=theme.colors().plot_background
+        )
         self._point.setZValue(60)
         plot.addItem(self._point)
         layout = QVBoxLayout(self)
@@ -119,9 +123,10 @@ class WaveformClusterSelection(QWidget):
         low = np.array([np.quantile(self._energy, 0.2), np.quantile(self._ratio, 0.2)])
         high = np.array([np.quantile(self._energy, 0.8), np.quantile(self._ratio, 0.8)])
         width = np.maximum(high - low, [1.0, 0.01])
+        ink = theme.colors().plot_ink
         style = dict(
-            pen=pg.mkPen("black", width=2), hoverPen=pg.mkPen("black", width=2),
-            handlePen=pg.mkPen("black"), handleHoverPen=pg.mkPen("black", width=2),
+            pen=pg.mkPen(ink, width=2), hoverPen=pg.mkPen(ink, width=2),
+            handlePen=pg.mkPen(ink), handleHoverPen=pg.mkPen(ink, width=2),
         )
         if shape == "rectangle":
             self._roi = pg.RectROI(low, width, sideScalers=True, **style)

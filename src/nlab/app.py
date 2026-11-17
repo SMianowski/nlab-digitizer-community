@@ -31,6 +31,7 @@ from nlab.utils.remote_board_power import (
     power_command_was_delivered,
     ssh_arguments,
 )
+from nlab.views import theme
 from nlab.views.about_dialog import AboutDialog
 from nlab.views.app_events import application_event_hub
 from nlab.views.connection_dialog import ConnectionDialog
@@ -122,6 +123,7 @@ class MainAppWindow(QMainWindow):
         self._board_power_process: QProcess | None = None
         self._board_power_command: BoardPowerCommand | None = None
         self._board_power_phase: str | None = None
+        self._timing_validation_dialog: TimingValidationDialog | None = None
         self._base_window_title = (
             "Nuclear Lab Digitizer — Offline"
             if self._offline
@@ -275,20 +277,14 @@ class MainAppWindow(QMainWindow):
 
         self._replay_indicator = QLabel(self)
         self._replay_indicator.setObjectName("replayModeIndicator")
-        self._replay_indicator.setStyleSheet(
-            "QLabel { background: #7353a6; color: white; border-radius: 3px; "
-            "font-weight: 600; padding: 2px 8px; }"
-        )
+        self._replay_indicator.setStyleSheet(theme.badge_style("replay"))
         self._replay_indicator.setAccessibleName("Session replay mode indicator")
         self._replay_indicator.hide()
         self.statusBar().addPermanentWidget(self._replay_indicator)
 
         self._offline_indicator = QLabel("OFFLINE", self)
         self._offline_indicator.setObjectName("offlineModeIndicator")
-        self._offline_indicator.setStyleSheet(
-            "QLabel { background: #455a64; color: white; border-radius: 3px; "
-            "font-weight: 600; padding: 2px 8px; }"
-        )
+        self._offline_indicator.setStyleSheet(theme.badge_style("offline"))
         self._offline_indicator.setAccessibleName("Offline analysis mode indicator")
         self._offline_indicator.setToolTip(
             "No hardware transport is open. Analysis tools and deterministic session "
@@ -299,10 +295,7 @@ class MainAppWindow(QMainWindow):
 
         self._measurement_indicator = QLabel(self)
         self._measurement_indicator.setObjectName("measurementActiveIndicator")
-        self._measurement_indicator.setStyleSheet(
-            "QLabel { background: #2e7d32; color: white; border-radius: 3px; "
-            "font-weight: 600; padding: 2px 8px; }"
-        )
+        self._measurement_indicator.setStyleSheet(theme.badge_style("active"))
         self._measurement_indicator.setAccessibleName("Active measurement channels")
         self._measurement_indicator.setTextFormat(Qt.TextFormat.PlainText)
         self._measurement_indicator.hide()
@@ -313,10 +306,7 @@ class MainAppWindow(QMainWindow):
             self,
         )
         self._energy_calibration_indicator.setObjectName("energyCalibrationIndicator")
-        self._energy_calibration_indicator.setStyleSheet(
-            "QLabel { background: #2e7d32; color: white; border-radius: 3px; "
-            "font-weight: 600; padding: 2px 8px; }"
-        )
+        self._energy_calibration_indicator.setStyleSheet(theme.badge_style("calibrated"))
         self._energy_calibration_indicator.setAccessibleName(
             "Energy calibration active indicator"
         )
@@ -896,7 +886,16 @@ class MainAppWindow(QMainWindow):
         self._controller.show_waveform_analysis()
 
     def _on_validate_timing(self) -> None:
-        TimingValidationDialog(self).exec()
+        # A modeless tool window like the other analysis tools (a modal one
+        # with a minimize button would leave the main window locked). One
+        # instance is reused, so the chosen files survive closing it.
+        dialog = self._timing_validation_dialog
+        if dialog is None:
+            dialog = TimingValidationDialog(self)
+            self._timing_validation_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _on_energy_calibration(self) -> None:
         self._controller.show_energy_calibration()

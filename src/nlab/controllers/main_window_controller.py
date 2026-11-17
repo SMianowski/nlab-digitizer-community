@@ -29,7 +29,7 @@ from nlab.controllers.interlock import ReplayInterlock
 from nlab.controllers.mca_controller import MCAController
 from nlab.controllers.psd_controller import PSDController
 from nlab.controllers.psu_controller import PSUController
-from nlab.controllers.scope_controller import ScopeController
+from nlab.controllers.scope_controller import DisplayMode, ScopeController
 from nlab.controllers.session_replay_coordinator import SessionReplayCoordinator
 from nlab.hardware.digitizer.current_monitor import ScopeCurrentAccumulator
 from nlab.hardware.digitizer.device_information import DigitizerInformation, InformationSection
@@ -58,6 +58,7 @@ from nlab.views.panel_status import PanelStatus, PanelStatusPresenter
 from nlab.views.psd_readback_dialog import PsdReadbackDialog
 from nlab.views.waveform_analysis_dialog import WaveformAnalysisDialog
 from nlab.views.waveform_mca_transfer_dialog import McaGateTransferTarget
+from nlab.views.window_flags import TOOL_WINDOW_FLAGS
 
 if TYPE_CHECKING:
     from nlab_modbus.core.base_modbus_device import BaseModbusDevice
@@ -430,12 +431,7 @@ class MainWindowController:
         # Mask integer values: enum inversion can discard high hint bits.
         flags = (
             Qt.WindowType(int(dock.windowFlags()) & ~int(Qt.WindowType.WindowType_Mask))
-            | Qt.WindowType.Window
-            | Qt.WindowType.CustomizeWindowHint
-            | Qt.WindowType.WindowTitleHint
-            | Qt.WindowType.WindowSystemMenuHint
-            | Qt.WindowType.WindowMinMaxButtonsHint
-            | Qt.WindowType.WindowCloseButtonHint
+            | TOOL_WINDOW_FLAGS
         )
         if flags == dock.windowFlags():
             return
@@ -1264,7 +1260,7 @@ class MainWindowController:
             else {}
         )
         return {
-            "scope_display_mode": int(scope.get("display_mode", 0)),
+            "scope_display_mode": int(scope.get("display_mode", DisplayMode.RAW)),
             "scope_persistence": int(scope.get("persistence", 900)),
             "scope_refresh_rate_hz": int(scope.get("refresh_rate_hz", 10)),
             "mca_refresh_rate_hz": int(cast(int, mca.get("refresh_rate_hz", 5))),
@@ -1277,7 +1273,7 @@ class MainWindowController:
         if not isinstance(settings, dict):
             return
         scope_settings = {
-            "display_mode": settings.get("scope_display_mode", 0),
+            "display_mode": settings.get("scope_display_mode", int(DisplayMode.RAW)),
             "persistence": settings.get("scope_persistence", 900),
             "refresh_rate_hz": settings.get("scope_refresh_rate_hz", 10),
         }

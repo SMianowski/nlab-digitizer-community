@@ -8,6 +8,7 @@ import numpy as np
 import pyqtgraph as pg
 
 from nlab.analysis.energy_calibration import EnergyCalibration
+from nlab.views.plot_viewbox import set_frame_only
 
 
 class CalibratedEnergyAxis(pg.AxisItem):  # type: ignore[misc]
@@ -20,6 +21,9 @@ class CalibratedEnergyAxis(pg.AxisItem):  # type: ignore[misc]
         self._calibration: EnergyCalibration | None = None
         self._binning_index = 0
         self._stale = False
+        # Uncalibrated, this axis only mirrors the raw channels on the opposite
+        # side: keep it as a frame line until a calibration gives it meaning.
+        set_frame_only(self, True)
 
     def set_calibration(
         self,
@@ -33,8 +37,10 @@ class CalibratedEnergyAxis(pg.AxisItem):  # type: ignore[misc]
         self._stale = stale
         if calibration is None:
             self.setLabel(text="")
-            self.setToolTip("No energy calibration is applied; top ticks mirror raw channels.")
+            set_frame_only(self, True)
+            self.setToolTip("No energy calibration is applied.")
         else:
+            set_frame_only(self, False)
             self.setLabel(text="Energy (stale)" if stale else "Energy", units="keV")
             self.setToolTip(
                 "Calibration settings no longer match the MCA energy configuration."

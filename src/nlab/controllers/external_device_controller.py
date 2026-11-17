@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from nlab.ui.ui_external_device_view import Ui_ExternalDeviceView
+from nlab.views import theme
 from nlab.views.numeric_controls import bind_numeric_control
 from nlab.views.responsive_layout import configure_external_layout
 from nlab.workers.external_device_worker import ExternalDeviceWorker
@@ -174,7 +175,7 @@ class ExternalDeviceController(QWidget):
         self.ui.btnStopMonitor.clicked.connect(self._on_stop_monitor)
         self.ui.spinRefreshRate.valueChanged.connect(self._on_refresh_rate_changed)
 
-        self.ui.plotWidget.setBackground("#f8f9fa")
+        self.ui.plotWidget.setBackground(theme.colors().plot_background)
         self.ui.plotWidget.showGrid(x=True, y=True, alpha=0.2)
         self.ui.plotWidget.setLabel("bottom", "Time", units="s")
         self.ui.plotWidget.setLabel("left", "Value", units="")

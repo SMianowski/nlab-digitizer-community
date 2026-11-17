@@ -2,5 +2,19 @@
     <qresource prefix="/">
         <file>icons/ewt.ico</file>
         <file>ewt.png</file>
+        <file>brand/ewt-vertical-color-on-light.svg</file>
+        <file>brand/ewt-vertical-color-on-dark.svg</file>
+        <file>icons/chevron-down.svg</file>
+        <file>icons/chevron-down-disabled.svg</file>
+        <file>icons/chevron-up.svg</file>
+        <file>icons/chevron-up-disabled.svg</file>
+        <file>icons/chevron-down-dark.svg</file>
+        <file>icons/chevron-down-dark-disabled.svg</file>
+        <file>icons/chevron-up-dark.svg</file>
+        <file>icons/chevron-up-dark-disabled.svg</file>
+        <file>icons/check.svg</file>
+        <file>fonts/Roboto-Regular.ttf</file>
+        <file>fonts/Roboto-Medium.ttf</file>
+        <file>fonts/Roboto-Bold.ttf</file>
     </qresource>
 </RCC>

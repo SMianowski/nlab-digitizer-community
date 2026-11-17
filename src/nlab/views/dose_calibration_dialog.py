@@ -42,8 +42,10 @@ from nlab.analysis.dose_calibration import (
     PsuDoseCalibrationSnapshot,
     differential_spectrum_integrals,
 )
+from nlab.views import theme
 from nlab.views.numeric_controls import keep_enter_in_fields
-from nlab.views.plot_viewbox import NLabPlotWidget, style_plot_widget
+from nlab.views.plot_viewbox import NLabPlotWidget, show_frame_axes, style_plot_widget
+from nlab.views.window_flags import make_tool_window
 
 log = logging.getLogger(__name__)
 
@@ -237,6 +239,7 @@ class DoseCalibrationDialog(QDialog):
         if not sources:
             raise ValueError("dose calibration requires at least one MCA channel")
         super().__init__(parent)
+        make_tool_window(self)
         self._sources = tuple(sources)
         self._writer: DoseCalibrationCsvWriter | None = None
         self._previous_histogram: np.ndarray | None = None
@@ -300,7 +303,7 @@ class DoseCalibrationDialog(QDialog):
         dose_row.addWidget(self.dose_unit)
         reference_form.addRow("Expected dose rate:", dose_row)
         self.committed_value = QLabel(reference_group)
-        self.committed_value.setStyleSheet("color: #2e7d32;")
+        self.committed_value.setStyleSheet(f"color: {theme.colors().status_success};")
         reference_form.addRow("Value used for rows:", self.committed_value)
         layout.addWidget(reference_group)
 
@@ -354,12 +357,8 @@ class DoseCalibrationDialog(QDialog):
         button_row = QHBoxLayout()
         self.start_button = QPushButton("Start CSV recording", output_group)
         self.stop_button = QPushButton("Stop", output_group)
-        self.start_button.setStyleSheet(
-            "QPushButton:enabled { background-color: #45b649; color: white; }"
-        )
-        self.stop_button.setStyleSheet(
-            "QPushButton:enabled { background-color: #ef5350; color: white; }"
-        )
+        theme.set_button_role(self.start_button, "start")
+        theme.set_button_role(self.stop_button, "stop")
         self.stop_button.setEnabled(False)
         button_row.addWidget(self.start_button)
         button_row.addWidget(self.stop_button)
@@ -381,8 +380,7 @@ class DoseCalibrationDialog(QDialog):
         self.plot_widget = NLabPlotWidget(plot_group)
         style_plot_widget(self.plot_widget)
         self.plot_widget.showGrid(x=True, y=True, alpha=0.2)
-        self.plot_widget.showAxis("top")
-        self.plot_widget.showAxis("right")
+        show_frame_axes(self.plot_widget)
         self.plot_widget.setLabel("bottom", "Recording elapsed time", units="s")
         self.plot_curve = self.plot_widget.plot(pen=pg.mkPen("#1f77b4", width=2.0))
         plot_layout.addWidget(self.plot_widget, 1)

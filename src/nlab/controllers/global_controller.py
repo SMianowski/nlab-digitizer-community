@@ -14,6 +14,7 @@ from nlab.hardware.digitizer.diagnostics import GlobalDiagnosticReading
 from nlab.hardware.digitizer.digitizer import Digitizer
 from nlab.hardware.digitizer.mca import MCA_PARAMETER_SPECS, MCAParam
 from nlab.ui.ui_global_view import Ui_GlobalView
+from nlab.views import theme
 from nlab.views.responsive_layout import configure_global_layout
 from nlab.workers.base_worker import pause_requests
 from nlab.workers.global_diagnostics_worker import GlobalDiagnosticsWorker
@@ -228,7 +229,7 @@ class GlobalController(QWidget):
 
     def _set_temperature_status(self, message: str, *, error: bool = False) -> None:
         self.ui.lblTemperatureStatus.setText(message)
-        color = "#b00020" if error else "#2e7d32"
+        color = theme.status_color(error=error)
         self.ui.lblTemperatureStatus.setStyleSheet(f"color: {color};")
 
     def _on_temperature_coefficient_changed(self) -> None:
@@ -490,7 +491,7 @@ class GlobalController(QWidget):
 
     def _set_sync_status(self, message: str, *, error: bool = False) -> None:
         self.ui.lblSyncStatus.setText(message)
-        color = "#b00020" if error else "#2e7d32"
+        color = theme.status_color(error=error)
         self.ui.lblSyncStatus.setStyleSheet(f"color: {color};")
 
     def _on_sync_source_changed(self, source: int) -> None:
@@ -745,7 +746,10 @@ class GlobalController(QWidget):
                 QTableWidgetItem(reading.unit),
             )
             if reading.healthy is not None:
-                color = QColor("#dff0d8" if reading.healthy else "#f8d7da")
+                palette = theme.colors()
+                color = QColor(
+                    palette.status_success_tint if reading.healthy else palette.status_error_tint
+                )
                 for item in items:
                     item.setBackground(color)
             for column, item in enumerate(items):
@@ -789,7 +793,7 @@ class GlobalController(QWidget):
 
     def _on_diagnostics_error(self, message: str) -> None:
         self.ui.lblLastUpdate.setText(f"Read error: {message}")
-        self.ui.lblLastUpdate.setStyleSheet("color: #b00020;")
+        self.ui.lblLastUpdate.setStyleSheet(f"color: {theme.colors().status_error};")
 
     def _on_diagnostics_finished(self, thread: QThread) -> None:
         if thread is not self._worker_thread:

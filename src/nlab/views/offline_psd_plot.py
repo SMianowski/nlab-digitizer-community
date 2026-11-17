@@ -22,12 +22,11 @@ from PySide6.QtWidgets import (
 
 from nlab.views.app_events import application_event_hub
 from nlab.views.image_display import transparent_sparse_bins
-from nlab.views.plot_viewbox import NLabPlotWidget, style_plot_widget
+from nlab.views.plot_viewbox import NLabPlotWidget, show_frame_axes, style_plot_widget
 from nlab.views.psd_fom_widget import PsdFomWidget
 from nlab.views.tooltips import wrap_widget_tooltips
 
 _MATRIX_COLUMN_LEFT_AXIS_WIDTH = 84
-_MATRIX_COLUMN_RIGHT_AXIS_WIDTH = 66
 
 
 @dataclass(frozen=True)
@@ -100,8 +99,7 @@ class OfflinePsdPlot(QWidget):
         self._matrix_widget = NLabPlotWidget(plots_widget)
         style_plot_widget(self._matrix_widget)
         self.matrix_plot = self._matrix_widget.getPlotItem()
-        self.matrix_plot.showAxis("top")
-        self.matrix_plot.showAxis("right")
+        show_frame_axes(self.matrix_plot)
         self.matrix_plot.getViewBox().setDefaultPadding(0.0)
         self.matrix_plot.setLabel("left", "PSD ratio")
         self.matrix_plot.setLabel("bottom", "Long-gate charge", units="raw")
@@ -130,8 +128,7 @@ class OfflinePsdPlot(QWidget):
         self._ratio_widget.setMaximumWidth(300)
         self.ratio_plot = self._ratio_widget.getPlotItem()
         self.ratio_plot.setYLink(self.matrix_plot)
-        self.ratio_plot.showAxis("top")
-        self.ratio_plot.showAxis("right")
+        show_frame_axes(self.ratio_plot)
         self.ratio_plot.showGrid(x=True, y=True, alpha=0.2)
         self.ratio_plot.setLabel("bottom", "Counts")
         self.ratio_plot.setLabel("left", "PSD ratio")
@@ -142,14 +139,14 @@ class OfflinePsdPlot(QWidget):
         self._energy_widget.setMaximumHeight(240)
         self.energy_plot = self._energy_widget.getPlotItem()
         self.energy_plot.setXLink(self.matrix_plot)
-        self.energy_plot.showAxis("top")
-        self.energy_plot.showAxis("right")
+        show_frame_axes(self.energy_plot)
         self.energy_plot.showGrid(x=True, y=True, alpha=0.2)
         self.energy_plot.setLabel("left", "Counts")
         self.energy_plot.setLabel("bottom", "Long-gate charge", units="raw")
+        # Equal left axis widths and zero-width right frame axes keep the
+        # matrix and its energy projection the same width (see show_frame_axes).
         for plot in (self.matrix_plot, self.energy_plot):
             plot.getAxis("left").setWidth(_MATRIX_COLUMN_LEFT_AXIS_WIDTH)
-            plot.getAxis("right").setWidth(_MATRIX_COLUMN_RIGHT_AXIS_WIDTH)
         self._energy_widget.setToolTip(
             "Hover here and press L to toggle logarithmic Y scale. "
             "Shift+wheel zooms X; Ctrl+wheel zooms Y."

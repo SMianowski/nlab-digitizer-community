@@ -39,8 +39,10 @@ from nlab.analysis.energy_calibration import (
     fit_calibration_peak,
     fit_energy_calibration,
 )
+from nlab.views import theme
 from nlab.views.plot_viewbox import ModifierZoomViewBox
 from nlab.views.tooltips import wrap_widget_tooltips
+from nlab.views.window_flags import make_tool_window
 from nlab.views.workbench_menu import WorkbenchMenuBar
 
 if TYPE_CHECKING:
@@ -95,6 +97,7 @@ class EnergyCalibrationDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        make_tool_window(self)
         self.setWindowTitle("MCA Energy Calibration")
         self.resize(1320, 680)
         self.setMinimumSize(1050, 600)
@@ -148,7 +151,7 @@ class EnergyCalibrationDialog(QDialog):
         self.plot_splitter = QSplitter(Qt.Orientation.Vertical, self)
         self.plot = pg.PlotWidget(self.plot_splitter, viewBox=ModifierZoomViewBox())
         self.plot.setMinimumHeight(260)
-        self.plot.setBackground("#f8f9fa")
+        self.plot.setBackground(theme.colors().plot_background)
         self.plot.setLabel("bottom", "MCA channel")
         self.plot.setLabel("left", "Counts")
         self.plot.showGrid(x=True, y=True, alpha=0.2)
@@ -161,7 +164,7 @@ class EnergyCalibrationDialog(QDialog):
         )
         self.residual_plot.setMinimumHeight(120)
         self.residual_plot.setMaximumHeight(220)
-        self.residual_plot.setBackground("#f8f9fa")
+        self.residual_plot.setBackground(theme.colors().plot_background)
         self.residual_plot.setLabel("left", "Fit residual", units="counts")
         self.residual_plot.setLabel("bottom", "MCA channel")
         self.residual_plot.showGrid(x=True, y=True, alpha=0.2)
@@ -176,7 +179,7 @@ class EnergyCalibrationDialog(QDialog):
 
         side = QWidget(self)
         side.setMinimumWidth(400)
-        side.setMaximumWidth(500)
+        side.setMaximumWidth(600)
         side_layout = QVBoxLayout(side)
         model_row = QHBoxLayout()
         model_row.addWidget(QLabel("Fit model:", self))
@@ -216,13 +219,35 @@ class EnergyCalibrationDialog(QDialog):
         for column in range(self.table.columnCount()):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(_COL_SOURCE, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(_COL_POINT, 32)
-        self.table.setColumnWidth(_COL_LABEL, 36)
-        self.table.setColumnWidth(_COL_SEED, 50)
-        self.table.setColumnWidth(_COL_CENTROID, 60)
-        self.table.setColumnWidth(_COL_ENERGY, 60)
-        self.table.setColumnWidth(_COL_RESIDUAL, 48)
-        self.table.setColumnWidth(_COL_ENABLED, 28)
+        # Compact value columns, but never narrower than their own header:
+        # the header's size hint follows the active font and theme padding.
+        for column, width in (
+            (_COL_POINT, 32),
+            (_COL_LABEL, 36),
+            (_COL_SEED, 50),
+            (_COL_CENTROID, 60),
+            (_COL_ENERGY, 60),
+            (_COL_RESIDUAL, 48),
+            (_COL_ENABLED, 28),
+        ):
+            self.table.setColumnWidth(column, max(width, header.sectionSizeHint(column)))
+        # Keep every column visible at the dialog's minimum size: the panel is
+        # never narrower than the fixed columns plus a usable Spectrum column.
+        margins = side_layout.contentsMargins()
+        columns_width = sum(
+            self.table.columnWidth(column)
+            for column in range(self.table.columnCount())
+            if column != _COL_SOURCE
+        )
+        needed = (
+            columns_width
+            + header.sectionSizeHint(_COL_SOURCE)
+            + 2 * self.table.frameWidth()
+            + margins.left()
+            + margins.right()
+        )
+        side.setMinimumWidth(max(400, needed))
+        side.setMaximumWidth(max(600, needed))
         side_layout.addWidget(self.table, 1)
 
         self.add_action = self.menu_bar.command(self.analysis_menu, "Add point")

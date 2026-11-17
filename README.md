@@ -59,6 +59,11 @@ uv run nlab
 Generate the UI files after a fresh clone or changes to the forms/resources.
 For subsequent launches, run `uv run nlab` from the project directory.
 
+Choose the interface theme under **Settings > General Settings > Appearance**:
+**EWT light** (default), **EWT dark** or **Classic** (the platform's native style and
+the original colours). The choice applies the next time the application starts;
+`NLAB_THEME=light|dark|classic` overrides it for one launch.
+
 ## Connect a digitizer
 
 1. Connect your computer and digitizer to the same network or use the board's

@@ -30,6 +30,9 @@ VIEW_LOG_Y = "view/log_y"
 VIEW_SCOPE_DISTRIBUTION = "view/scope_distribution"
 TIMING_CHANNEL_B_OFFSET_NS = "timing/channel_b_offset_ns"
 
+# Appearance (applies at the next start)
+APPEARANCE_THEME = "appearance/theme"
+
 # Global workspace
 GLOBAL_DIAGNOSTICS_INTERVAL_MS = "global/diagnostics_interval_ms"
 GLOBAL_TEMPERATURE_INTERVAL_MS = "global/temperature_interval_ms"

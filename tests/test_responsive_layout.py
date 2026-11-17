@@ -177,7 +177,10 @@ def test_global_controls_use_available_width_in_two_columns(qtbot: QtBot) -> Non
     assert isinstance(panel_columns, QBoxLayout)
     assert panel_columns.objectName() == "globalPanelColumns"
     assert panel_columns.direction() == QBoxLayout.Direction.LeftToRight
-    assert panel_columns.stretch(0) == panel_columns.stretch(1) == 1
+    # Natural-width columns packed left; the trailing stretch takes spare width.
+    assert panel_columns.stretch(0) == panel_columns.stretch(1) == 0
+    assert panel_columns.itemAt(2).spacerItem() is not None
+    assert panel_columns.stretch(2) == 1
 
     control_column = panel_columns.itemAt(0).layout()
     assert isinstance(control_column, QBoxLayout)
@@ -204,7 +207,7 @@ def test_global_controls_use_available_width_in_two_columns(qtbot: QtBot) -> Non
     )
 
 
-def test_psu_controls_form_a_compact_band_above_the_plot(qtbot: QtBot) -> None:
+def test_psu_controls_stack_in_one_column_beside_the_plot(qtbot: QtBot) -> None:
     view = QWidget()
     qtbot.addWidget(view)
     ui = Ui_PSUView()
@@ -218,14 +221,19 @@ def test_psu_controls_form_a_compact_band_above_the_plot(qtbot: QtBot) -> None:
 
     scroll = view.findChild(QScrollArea, "psuControlScroll")
     assert scroll is not None
-    assert ui.horizontalLayout.direction() == QBoxLayout.Direction.TopToBottom
-    telemetry_column = ui.columnsLayout.itemAt(2).layout()
-    assert isinstance(telemetry_column, QBoxLayout)
-    assert telemetry_column.objectName() == "psuTelemetryColumn"
-    assert telemetry_column.indexOf(ui.groupTemp) == 0
-    assert telemetry_column.indexOf(ui.groupMonitoring) == 1
-    assert scroll.geometry().y() < ui.plotHvVoltage.geometry().y()
-    assert scroll.width() == ui.plotHvVoltage.width()
+    assert ui.horizontalLayout.direction() == QBoxLayout.Direction.LeftToRight
+    order = (
+        ui.groupSipm,
+        ui.groupSipmCompens,
+        ui.groupHv,
+        ui.groupHvCompens,
+        ui.groupTemp,
+        ui.groupMonitoring,
+    )
+    assert [ui.controlLayout.indexOf(group) for group in order] == list(range(len(order)))
+    assert scroll.geometry().right() < ui.plotHvVoltage.geometry().left()
+    assert 300 <= scroll.width() <= 460
+    assert ui.plotHvVoltage.width() > scroll.width()
     assert scroll.horizontalScrollBar().maximum() == 0
 
 

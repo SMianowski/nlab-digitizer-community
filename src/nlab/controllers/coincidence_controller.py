@@ -58,10 +58,11 @@ from nlab.hardware.digitizer.iio_listmode import TIME_Q_PER_NS, VDPP_ZC_CALC_SCH
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode
 from nlab.utils.recording_paths import measurement_folder
 from nlab.utils.settings_io import write_configuration
+from nlab.views import theme
 from nlab.views.energy_axis import CalibratedEnergyAxis
 from nlab.views.image_display import transparent_sparse_bins
 from nlab.views.panel_status import PanelStatus
-from nlab.views.plot_viewbox import ModifierZoomViewBox
+from nlab.views.plot_viewbox import ModifierZoomViewBox, show_frame_axes
 from nlab.workers.coincidence_worker import CoincidenceAnalysisThread
 
 log = logging.getLogger(__name__)
@@ -75,12 +76,6 @@ class CoincidenceState(StrEnum):
     RUNNING = "running"  # shared START asserted
     STOPPING = "stopping"  # START lowered; both streams draining
 _CHANNELS = (0, 1)
-_START_BUTTON_STYLE = """QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }
-QPushButton:checked { background-color: #2E7D32; border: 2px solid #1B5E20; }
-QPushButton:disabled { background-color: #A5D6A7; color: #E0E0E0; }"""
-_STOP_BUTTON_STYLE = """QPushButton { background-color: #f44336; color: white; font-weight: bold; }
-QPushButton:checked { background-color: #C62828; border: 2px solid #B71C1C; }
-QPushButton:disabled { background-color: #EF9A9A; color: #E0E0E0; }"""
 
 
 def _ns_to_q(value: float, rounding: str) -> int:
@@ -176,8 +171,8 @@ class CoincidenceController(QWidget):
         self.btnStop = QPushButton("Stop")
         self.btnStart.setCheckable(True)
         self.btnStop.setCheckable(True)
-        self.btnStart.setStyleSheet(_START_BUTTON_STYLE)
-        self.btnStop.setStyleSheet(_STOP_BUTTON_STYLE)
+        theme.set_button_role(self.btnStart, "start")
+        theme.set_button_role(self.btnStop, "stop")
         self.btnStop.setEnabled(False)
         buttons.addWidget(self.btnStart)
         buttons.addWidget(self.btnStop)
@@ -364,7 +359,7 @@ class CoincidenceController(QWidget):
                 "right": self._matrix_energy_axes[1],
             },
         )
-        self.matrix_plot.setBackground("#f8f9fa")
+        self.matrix_plot.setBackground(theme.colors().plot_background)
         self.matrix_plot.setTitle("Coincident CH0-CH1 energy matrix")
         self.matrix_plot.setLabel("bottom", "CH0 MCA channel")
         self.matrix_plot.setLabel("left", "CH1 MCA channel")
@@ -447,19 +442,18 @@ class CoincidenceController(QWidget):
     @staticmethod
     def _plot(title: str, axis: str, unit: str | None, color: str) -> tuple[Any, Any]:
         plot = pg.PlotWidget(viewBox=ModifierZoomViewBox())
-        plot.setBackground("#f8f9fa")
+        plot.setBackground(theme.colors().plot_background)
         plot.setTitle(title)
         plot.setLabel("left", "Counts")
         plot.setLabel("bottom", axis, units=unit)
         plot.showGrid(x=True, y=True, alpha=0.2)
-        plot.showAxis("top")
-        plot.showAxis("right")
+        show_frame_axes(plot)
         curve = plot.plot(pen=pg.mkPen(color, width=1.5), stepMode="center")
         return plot, curve
 
     @staticmethod
     def _add_roi_region(plot: Any) -> pg.LinearRegionItem:
-        region = pg.LinearRegionItem(values=(0, 1), movable=False)
+        region = pg.LinearRegionItem(values=(0, 1), movable=False, **theme.region_style())
         region.setZValue(5)
         plot.addItem(region, ignoreBounds=True)
         region.setVisible(False)

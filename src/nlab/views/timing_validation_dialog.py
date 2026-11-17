@@ -25,6 +25,7 @@ from nlab import settings_keys
 from nlab.analysis.timing_validation import TimingValidationResult
 from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.plot_viewbox import ModifierZoomViewBox
+from nlab.views.window_flags import make_tool_window
 from nlab.workers.timing_validation_worker import TimingValidationWorker
 
 _FILE_FILTER = "NLab MCA events (*.bin *.h5 *.hdf5 *.root);;All files (*)"
@@ -36,6 +37,7 @@ class TimingValidationDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        make_tool_window(self)
         self.setWindowTitle("Validate Two-Channel Timing")
         self.resize(840, 630)
         self._worker: TimingValidationWorker | None = None

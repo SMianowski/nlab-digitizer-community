@@ -16,7 +16,7 @@ from nlab.ui.ui_psd_view import Ui_PSDView
 from nlab.views.app_events import application_event_hub
 from nlab.views.image_display import transparent_sparse_bins
 from nlab.views.panel_status import PanelStatus
-from nlab.views.plot_viewbox import style_plot_widget
+from nlab.views.plot_viewbox import show_frame_axes, style_plot_widget
 from nlab.views.psd_fom_widget import PsdFomWidget
 from nlab.views.responsive_layout import configure_psd_layout
 
@@ -24,7 +24,6 @@ log = logging.getLogger(__name__)
 
 _DISPLAY_INTERVAL_MS = 100
 _MATRIX_COLUMN_LEFT_AXIS_WIDTH = 84
-_MATRIX_COLUMN_RIGHT_AXIS_WIDTH = 66
 
 
 class PSDController(QWidget):
@@ -89,8 +88,7 @@ class PSDController(QWidget):
             style_plot_widget(widget)
 
         self._psd_plot = self.ui.plotPsd.getPlotItem()
-        self._psd_plot.showAxis("right")
-        self._psd_plot.showAxis("top")
+        show_frame_axes(self._psd_plot)
         self._psd_plot.getViewBox().setDefaultPadding(0.0)
         self._psd_plot.setLabel("bottom", "Trapezoid energy", units="raw")
         self._psd_plot.setLabel("left", "1 - charge / trapezoid")
@@ -117,8 +115,7 @@ class PSDController(QWidget):
         self._psd_plot.addItem(self._energy_roi)
 
         self._ratio_plot = self.ui.plotRatio.getPlotItem()
-        self._ratio_plot.showAxis("right")
-        self._ratio_plot.showAxis("top")
+        show_frame_axes(self._ratio_plot)
         self._ratio_plot.showGrid(x=True, y=True, alpha=0.2)
         self._ratio_plot.setLabel("bottom", "Counts")
         self._ratio_plot.setLabel("left", "PSD ratio")
@@ -131,15 +128,17 @@ class PSDController(QWidget):
         self._ratio_plot.addItem(self._ratio_cut_line)
 
         self._energy_plot = self.ui.plotEnergy.getPlotItem()
-        self._energy_plot.showAxis("right")
-        self._energy_plot.showAxis("top")
+        show_frame_axes(self._energy_plot)
         self._energy_plot.showGrid(x=True, y=True, alpha=0.2)
         self._energy_plot.setLabel("bottom", "Trapezoid energy", units="raw")
         self._energy_plot.setLabel("left", "Counts")
         self._energy_plot.addLegend(offset=(10, 10))
+        # The energy projection shares the matrix's X range: equal left axis
+        # widths (and zero-width frame axes on the right) keep their view boxes
+        # the same width. The ratio projection likewise matches the matrix's
+        # top frame axis and bottom axis height.
         for plot in (self._psd_plot, self._energy_plot):
             plot.getAxis("left").setWidth(_MATRIX_COLUMN_LEFT_AXIS_WIDTH)
-            plot.getAxis("right").setWidth(_MATRIX_COLUMN_RIGHT_AXIS_WIDTH)
         self.ui.plotEnergy.setToolTip(
             "Hover here and press L to toggle logarithmic Y scale. "
             "Shift+wheel zooms X; Ctrl+wheel zooms Y."

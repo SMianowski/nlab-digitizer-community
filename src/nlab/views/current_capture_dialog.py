@@ -33,8 +33,10 @@ from nlab.analysis.current_capture import (
     CurrentCaptureInfo,
     CurrentChunk,
 )
+from nlab.views import theme
 from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.plot_viewbox import ModifierZoomViewBox
+from nlab.views.window_flags import make_tool_window
 from nlab.workers.current_capture_worker import CurrentCaptureWorker
 
 _TITLE = "Current Capture Analysis"
@@ -42,7 +44,8 @@ _TITLE = "Current Capture Analysis"
 
 class CurrentCaptureDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent, Qt.WindowType.Window)
+        super().__init__(parent)
+        make_tool_window(self)
         self.setWindowTitle(_TITLE)
         self.resize(1180, 850)
         self._path: Path | None = None
@@ -115,7 +118,7 @@ class CurrentCaptureDialog(QDialog):
         averaging_controls.addStretch()
         data_layout.addLayout(averaging_controls)
         self.trace_plot = pg.PlotWidget(viewBox=ModifierZoomViewBox())
-        self.trace_plot.setBackground("#f8f9fa")
+        self.trace_plot.setBackground(theme.colors().plot_background)
         self.trace_plot.showGrid(x=True, y=True, alpha=0.2)
         self.trace_plot.setLabel("bottom", "Time from chunk start", units="µs")
         self.trace_plot.getAxis("bottom").enableAutoSIPrefix(False)
@@ -165,7 +168,7 @@ class CurrentCaptureDialog(QDialog):
         )
         data_layout.addLayout(stats)
         self.distribution_plot = pg.PlotWidget(viewBox=ModifierZoomViewBox())
-        self.distribution_plot.setBackground("#f8f9fa")
+        self.distribution_plot.setBackground(theme.colors().plot_background)
         self.distribution_plot.setLabel("bottom", "Counts")
         self.distribution_plot.hideAxis("left")
         self.distribution_plot.showGrid(x=True, y=True, alpha=0.2)

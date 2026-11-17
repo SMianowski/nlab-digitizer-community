@@ -39,6 +39,7 @@ from nlab.utils.recording_paths import (
     measurement_folder,
     unique_recording_path,
 )
+from nlab.views import theme
 from nlab.views.energy_axis import CalibratedEnergyAxis
 from nlab.views.histogram_curve import StepHistogramCurve
 from nlab.views.mca_roi_history_dialog import (
@@ -47,7 +48,7 @@ from nlab.views.mca_roi_history_dialog import (
 )
 from nlab.views.numeric_controls import normalize_numeric_control
 from nlab.views.panel_status import PanelStatus
-from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE, ModifierZoomViewBox
+from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE, ModifierZoomViewBox, show_frame_axes
 from nlab.views.responsive_layout import configure_mca_layout
 from nlab.views.spec_binding import bind_double_spinbox, bind_slider, bind_spinbox
 from nlab.views.time_axis import format_duration_ns, time_axis_scale
@@ -730,12 +731,11 @@ class MCAController(QWidget):
         layout = pg.GraphicsLayout()
         layout.setContentsMargins(10, 10, 10, 10)
         self.ui.plotDebug.setCentralItem(layout)
-        self.ui.plotDebug.setBackground("#f8f9fa")
+        self.ui.plotDebug.setBackground(theme.colors().plot_background)
 
         layout.addLabel("Amplitude", angle=-90)
         self._debug_plot = layout.addPlot(viewBox=ModifierZoomViewBox())
-        self._debug_plot.showAxis("right")
-        self._debug_plot.showAxis("top")
+        show_frame_axes(self._debug_plot)
         self._debug_plot.showGrid(x=True, y=True, alpha=0.2)
         self._debug_plot.addLegend(offset=(-10, -10))
         layout.nextRow()
@@ -752,7 +752,7 @@ class MCAController(QWidget):
             stepMode=WAVEFORM_STEP_MODE,
         )
         self._debug_cc_guide = pg.PlotDataItem(
-            pen=pg.mkPen("#000000", width=1.5, style=Qt.PenStyle.DashLine),
+            pen=pg.mkPen(theme.colors().plot_ink, width=1.5, style=Qt.PenStyle.DashLine),
             stepMode=WAVEFORM_STEP_MODE,
         )
         self._debug_cc_guide.setZValue(5)
@@ -1015,7 +1015,7 @@ class MCAController(QWidget):
         layout = pg.GraphicsLayout()
         layout.setContentsMargins(10, 10, 10, 10)
         self.ui.plotHistogram.setCentralItem(layout)
-        self.ui.plotHistogram.setBackground("#f8f9fa")
+        self.ui.plotHistogram.setBackground(theme.colors().plot_background)
         self.ui.plotHistogram.setToolTip(
             "Hover here and press L to toggle logarithmic Y scale. "
             "Shift+wheel zooms X; Ctrl+wheel zooms Y."
@@ -1027,8 +1027,8 @@ class MCAController(QWidget):
             viewBox=ModifierZoomViewBox(),
             axisItems={"top": self._energy_axis},
         )
-        self._hist_plot.showAxis("right")
-        self._hist_plot.showAxis("top")
+        show_frame_axes(self._hist_plot, "right")
+        self._hist_plot.showAxis("top")  # Energy axis: values only when calibrated.
         self._hist_plot.showGrid(x=True, y=True, alpha=0.2)
         layout.nextRow()
         layout.addLabel("Channel", col=1)
@@ -1037,7 +1037,9 @@ class MCAController(QWidget):
         self._hist_curve = StepHistogramCurve(pen=pg.mkPen("#1f77b4", width=1))
         self._hist_plot.addItem(self._hist_curve)
 
-        self._roi = DoubleClickableLinearRegionItem(values=[100, 200], movable=True)
+        self._roi = DoubleClickableLinearRegionItem(
+            values=[100, 200], movable=True, **theme.region_style()
+        )
         self._roi_dragging = False
         self._roi.setZValue(10)
         self._roi.setToolTip(
@@ -1694,7 +1696,8 @@ class MCAController(QWidget):
             self.ui.cbCfdEnable.isChecked()
             and spin.value() < self.ui.spinPretrigger.value()
         )
-        spin.setStyleSheet("QSpinBox { color: #d35400; }" if early else "")
+        warning = theme.status_color(warning=True)
+        spin.setStyleSheet(f"QSpinBox {{ color: {warning}; }}" if early else "")
         tooltip = _MCA_CONTROL_TOOLTIPS["spinCfdTwLow"]
         if early:
             tooltip += (

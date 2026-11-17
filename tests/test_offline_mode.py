@@ -81,9 +81,8 @@ def test_hv_only_psu_replay_hides_unrecorded_sipm_fields(qtbot: QtBot) -> None:
     assert controller.ui.lblHvVoltage.text() == "120.0"
     assert controller.ui.groupSipm.isHidden()
     assert controller.ui.groupSipmCompens.isHidden()
-    assert controller.ui.columnsLayout.stretch(0) == 0
-    assert controller._control_scroll.minimumHeight() == 250
-    assert controller._control_scroll.maximumHeight() == 250
+    # The control column keeps the full height beside the plot.
+    assert controller._control_scroll.maximumHeight() > 1000
 
 
 def test_recorded_external_schema_preserves_units_and_ranges() -> None:
