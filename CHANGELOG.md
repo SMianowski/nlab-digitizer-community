@@ -38,13 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Waveform Analysis could stay busy forever after opening a file or running an
-  analysis (intermittent on GitHub's Linux runners, where tests timed out waiting for
-  the index thread). Its finish handler identified the worker through
-  `QObject.sender()`, which sometimes returned None, so the worker's thread never
-  quit; a thread-stack dump from CI showed no live worker thread. Each worker's
-  thread is now bound when it is wired (`retire_thread_when_finished` in
-  `nlab/workers/worker_thread.py`) and quit and joined on the GUI thread as before.
+- Waveform Analysis retires each worker thread through the thread bound when it
+  was wired (`retire_thread_when_finished` in `nlab/workers/worker_thread.py`)
+  instead of looking the worker up with `QObject.sender()`, which would have left
+  the thread running if it ever returned None.
+- Intermittent CI timeouts in the Waveform Analysis tests (GitHub Linux runners):
+  traced to the test session, not the application. The GUI garbage-collection
+  policy, once installed by an earlier test, collected many tests' leftover
+  widgets in a single 5-30 s pass inside a later test's 5 s wait. The test
+  suite now holds that collector's timer during each test and runs its
+  threshold check between tests (`tests/conftest.py`); on a timeout it also
+  reports each widget-owned QThread's state.
 - Current periodic sums lost windows while the Current plot was on screen. Live on
   .128 (IP124, 256-sample windows, gap 0) the shown GUI path covered 87.7–93% of the
   time; it now covers 99.7–99.8%, the same as a bare script. The remaining 0.2% is

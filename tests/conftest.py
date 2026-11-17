@@ -3,11 +3,48 @@
 from __future__ import annotations
 
 import faulthandler
+import gc
 import sys
 from collections.abc import Generator
 from typing import Any
 
 import pytest
+
+
+def _session_gui_collector() -> Any:
+    from PySide6.QtWidgets import QApplication
+
+    from nlab.views import gui_gc
+
+    collector = getattr(QApplication.instance(), gui_gc._APPLICATION_ATTRIBUTE, None)
+    if isinstance(collector, gui_gc.GuiGarbageCollector) and not collector.closed:
+        return collector
+    return None
+
+
+@pytest.fixture(autouse=True)
+def _collect_garbage_between_tests() -> Generator[None, None, None]:
+    """Run GUI-owned garbage collection between tests, never inside them.
+
+    The first test that builds MainAppWindow or WaveformAnalysisDialog installs
+    nlab.views.gui_gc, which disables automatic collection for the rest of
+    the session and collects from a 1 s GUI timer. Earlier tests' Qt widgets
+    and plots then sit in reference cycles until one collection destroys many
+    tests' worth at once: Docker and GitHub traces showed 5-30 s GUI-thread
+    collections inside a later test's 5 s pytest-qt wait, which then timed
+    out with its worker already finished. Holding the timer during each test
+    and running the collector's own threshold check at teardown keeps the
+    total collection work unchanged and moves every pause between tests.
+    test_gui_gc installs fresh collectors of its own and is unaffected.
+    """
+    collector = _session_gui_collector()
+    if collector is not None:
+        collector.timer.stop()
+    yield
+    collector = _session_gui_collector()
+    if collector is not None:
+        collector.timer.stop()  # The test may have installed it.
+        collector.check()
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -31,3 +68,30 @@ def pytest_runtest_makereport(
         sys.stderr.write(f"\n--- thread stacks after the wait timed out in {item.nodeid} ---\n")
         sys.stderr.flush()
         faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        _report_qt_threads()
+
+
+def _report_qt_threads() -> None:
+    """List widget-owned QThreads: an idle QThread has no Python stack to dump."""
+    from PySide6.QtCore import QThread
+    from PySide6.QtWidgets import QApplication
+
+    application = QApplication.instance()
+    if not isinstance(application, QApplication):
+        return
+    out = sys.stderr
+    out.write(f"--- Qt threads (python gc enabled={gc.isenabled()}) ---\n")
+    for widget in application.allWidgets():
+        for thread in widget.findChildren(QThread):
+            try:
+                state = f"running={thread.isRunning()} finished={thread.isFinished()}"
+            except RuntimeError as exc:
+                state = f"deleted ({exc})"
+            out.write(f"{type(widget).__name__}: QThread {state}\n")
+        if hasattr(widget, "_index_thread"):
+            out.write(
+                f"{type(widget).__name__}: _index_thread={widget._index_thread!r} "
+                f"_index_worker={widget._index_worker!r} "
+                f"loaded={getattr(widget, '_index', None) is not None}\n"
+            )
+    out.flush()
