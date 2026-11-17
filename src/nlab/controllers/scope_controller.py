@@ -48,12 +48,14 @@ from nlab.hardware.digitizer.scope import (
 )
 from nlab.ui.ui_scope_view import Ui_ScopeView
 from nlab.utils.recording_paths import measurement_folder, unique_recording_path
+from nlab.views import theme
 from nlab.views.numeric_controls import normalize_numeric_control
 from nlab.views.panel_status import PanelStatus
 from nlab.views.plot_viewbox import (
     DraggableScopeCurve,
     HistogramViewBox,
     ModifierZoomViewBox,
+    show_frame_axes,
 )
 from nlab.views.responsive_layout import configure_scope_layout
 from nlab.views.spec_binding import bind_slider, bind_spinbox
@@ -1948,12 +1950,11 @@ class ScopeController(QWidget):
         self._scope_plot_layout = layout
         layout.setContentsMargins(10, 10, 10, 10)
         self.ui.plotWaveform.setCentralItem(layout)
-        self.ui.plotWaveform.setBackground("#f8f9fa")
+        self.ui.plotWaveform.setBackground(theme.colors().plot_background)
 
         layout.addLabel("Amplitude [raw]", angle=-90)
         self._plot_item = layout.addPlot(viewBox=ModifierZoomViewBox())
-        self._plot_item.showAxis("right")
-        self._plot_item.showAxis("top")
+        show_frame_axes(self._plot_item)
         self._plot_item.showGrid(x=True, y=True, alpha=0.2)
         layout.nextRow()
         self._time_axis_label = layout.addLabel("Time [ns]", col=1)
@@ -1963,7 +1964,9 @@ class ScopeController(QWidget):
         self._distribution_plot = pg.PlotItem(viewBox=distribution_view)
         self._distribution_plot.setParentItem(self._scope_plot_layout)
         self._distribution_plot.hideAxis("left")
-        self._distribution_plot.showAxis("top")
+        # Same zero-height top frame as the waveform plot: their Y-linked view
+        # boxes keep the same top and bottom edges.
+        show_frame_axes(self._distribution_plot, "top")
         self._distribution_plot.showGrid(x=True, y=True, alpha=0.2)
         self._distribution_plot.setYLink(self._plot_item)
         self._distribution_curve = pg.PlotDataItem(
@@ -2198,11 +2201,11 @@ class ScopeController(QWidget):
         # Downsample to screen pixels before colour-mapping long frames.
         self._persistence_img = pg.ImageItem(autoDownsample=True)
         self._persistence_img.setImage(self._persistence_buffer, autoLevels=False, levels=(0, 1))
-        self._persistence_img.setColorMap("viridis")
+        self._persistence_img.setColorMap(theme.persistence_colormap())
         self._plot_item.addItem(self._persistence_img)
 
     def _setup_raw_layer(self) -> None:
-        self._raw_curve = DraggableScopeCurve(pen=pg.mkPen("#00bfff", width=1))
+        self._raw_curve = DraggableScopeCurve(pen=pg.mkPen(theme.colors().scope_trace, width=1))
         self._plot_item.addItem(self._raw_curve)
         self._raw_curve.setVisible(False)
 

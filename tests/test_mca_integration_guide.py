@@ -13,6 +13,7 @@ from pytestqt.qtbot import QtBot
 from nlab.controllers.mca_controller import MCAController
 from nlab.hardware.digitizer.mca import McaGateTiming
 from nlab.hardware.digitizer.offline import create_offline_digitizer
+from nlab.views import theme
 
 
 def _view(qtbot: QtBot) -> MCAController:
@@ -34,7 +35,7 @@ def test_cc_guide_is_black_dashed_stepped_and_only_present_when_enabled(qtbot: Q
     assert guide.isVisible()
     assert guide.opts["stepMode"] == "right"
     assert guide.opts["pen"].style() == Qt.PenStyle.DashLine
-    assert guide.opts["pen"].color().name() == "#000000"
+    assert guide.opts["pen"].color().name().upper() == theme.colors().plot_ink.upper()
     x, y = guide.getData()
     np.testing.assert_array_equal(x, [0, 0, 48, 256])
     np.testing.assert_allclose(y, [920, -920, 720, 920])

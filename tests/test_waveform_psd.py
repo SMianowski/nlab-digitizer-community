@@ -23,6 +23,7 @@ from nlab.analysis.waveform_psd import (
     integrate_waveform,
 )
 from nlab.hardware.digitizer.dma import FILE_HEADER_STRUCT, FILE_MAGIC, FILE_VERSION
+from nlab.views import theme
 from nlab.views.offline_psd_plot import OfflinePsdPlot
 from nlab.views.plot_viewbox import ModifierZoomViewBox
 from nlab.views.waveform_analysis_dialog import WaveformAnalysisDialog
@@ -212,7 +213,10 @@ def test_offline_psd_projection_axes_align_and_energy_l_toggles_log(qtbot: QtBot
     interface_background = plot.palette().color(QPalette.ColorRole.Window)
     for widget in (plot._matrix_widget, plot._ratio_widget, plot._energy_widget):
         assert widget.backgroundBrush().color() == interface_background
-        assert widget.getViewBox().background.brush().color().name() == "#f8f9fa"
+        assert (
+            widget.getViewBox().background.brush().color().name().upper()
+            == theme.colors().plot_background.upper()
+        )
 
     plot._energy_widget.underMouse = lambda: True
     key = QKeyEvent(

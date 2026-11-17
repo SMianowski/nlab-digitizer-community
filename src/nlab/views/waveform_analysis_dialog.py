@@ -57,7 +57,12 @@ from nlab.views.gui_gc import install_gui_garbage_collector
 from nlab.views.help_dialog import HelpDialog
 from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.offline_psd_plot import OfflinePsdPlot
-from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE, ModifierZoomViewBox, style_plot_widget
+from nlab.views.plot_viewbox import (
+    WAVEFORM_STEP_MODE,
+    ModifierZoomViewBox,
+    show_frame_axes,
+    style_plot_widget,
+)
 from nlab.views.time_axis import time_axis_scale
 from nlab.views.tooltips import wrap_widget_tooltips
 from nlab.views.waveform_cluster_export_dialog import (
@@ -66,6 +71,7 @@ from nlab.views.waveform_cluster_export_dialog import (
 )
 from nlab.views.waveform_cluster_selection import WaveformClusterSelection
 from nlab.views.waveform_mca_transfer_dialog import McaGateTransferTarget, WaveformMcaTransferDialog
+from nlab.views.window_flags import make_tool_window
 from nlab.workers.waveform_average_worker import WaveformAverage, WaveformAverageWorker
 from nlab.workers.waveform_file_worker import WaveformFileIndexWorker
 from nlab.workers.waveform_fom_optimization_worker import WaveformFomOptimizationWorker
@@ -105,6 +111,7 @@ class WaveformAnalysisDialog(QDialog):
     def __init__(self, parent: QWidget | None = None, *,
                  gate_targets: Callable[[], Sequence[McaGateTransferTarget]] | None = None) -> None:
         super().__init__(parent)
+        make_tool_window(self)
         install_gui_garbage_collector()
         self._gate_targets = gate_targets
         self._set_current_file(None)
@@ -214,8 +221,7 @@ class WaveformAnalysisDialog(QDialog):
         self.waveform_widget.setMinimumHeight(200)
         style_plot_widget(self.waveform_widget)
         self.waveform_plot = self.waveform_widget.getPlotItem()
-        self.waveform_plot.showAxis("top")
-        self.waveform_plot.showAxis("right")
+        show_frame_axes(self.waveform_plot)
         self.waveform_plot.showGrid(x=True, y=True, alpha=0.2)
         self.waveform_plot.setLabel("bottom", "Time", units="ns")
         for side in ("bottom", "top"):

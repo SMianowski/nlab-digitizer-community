@@ -65,8 +65,10 @@ from nlab.analysis.spectrum import (
     subtract_background,
 )
 from nlab.analysis.spectrum_io import export_spectrum_csv, load_spectra
-from nlab.views.plot_viewbox import ModifierZoomViewBox
+from nlab.views import theme
+from nlab.views.plot_viewbox import ModifierZoomViewBox, set_frame_only, show_frame_axes
 from nlab.views.tooltips import wrap_tooltip, wrap_widget_tooltips
+from nlab.views.window_flags import make_tool_window
 from nlab.views.workbench_menu import WorkbenchMenuBar
 from nlab.workers.peak_fit_worker import PeakFitWorker
 
@@ -103,14 +105,21 @@ class _SpectrumEnergyAxis(pg.AxisItem):  # type: ignore[misc]
         self.enableAutoSIPrefix(False)
         self._channel: np.ndarray | None = None
         self._energy: np.ndarray | None = None
+        # Without retained keV coordinates the axis only mirrors the bottom one.
+        set_frame_only(self, True)
 
     def set_spectrum(self, spectrum: Spectrum | None) -> None:
-        if spectrum is None or spectrum.axis_unit == "keV" or spectrum.energy_kev is None:
+        available = not (
+            spectrum is None or spectrum.axis_unit == "keV" or spectrum.energy_kev is None
+        )
+        if spectrum is None or not available:
             self._channel = None
             self._energy = None
             self.setLabel(text="")
+            set_frame_only(self, True)
             self.setToolTip("No secondary energy calibration is available.")
         else:
+            set_frame_only(self, False)
             self._channel = spectrum.x
             self._energy = spectrum.energy_kev
             stale = bool(spectrum.metadata.get("calibration_stale", False))
@@ -153,6 +162,7 @@ class McaPeakAnalysisDialog(QDialog):
 
     def __init__(self, controllers: list[MCAController], parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        make_tool_window(self)
         self.setWindowTitle("MCA Peak Analysis Workbench")
         self.resize(1500, 850)
         self.setMinimumSize(1120, 680)
@@ -236,7 +246,7 @@ class McaPeakAnalysisDialog(QDialog):
         splitter.addWidget(sources_panel)
 
         plot_widget = pg.GraphicsLayoutWidget(self)
-        plot_widget.setBackground("#f8f9fa")
+        plot_widget.setBackground(theme.colors().plot_background)
         self.energy_axis = _SpectrumEnergyAxis()
         self.spectrum_plot = plot_widget.addPlot(
             row=0,
@@ -244,12 +254,14 @@ class McaPeakAnalysisDialog(QDialog):
             viewBox=ModifierZoomViewBox(),
             axisItems={"top": self.energy_axis},
         )
-        self.spectrum_plot.showAxis("top")
-        self.spectrum_plot.showAxis("right")
+        self.spectrum_plot.showAxis("top")  # Energy axis: values only when available.
+        show_frame_axes(self.spectrum_plot, "right")
         self.spectrum_plot.showGrid(x=True, y=True, alpha=0.2)
         self.spectrum_plot.setLabel("left", "Counts")
         self.legend = self.spectrum_plot.addLegend()
-        self.fit_region = pg.LinearRegionItem(values=(0.0, 1.0), movable=True)
+        self.fit_region = pg.LinearRegionItem(
+            values=(0.0, 1.0), movable=True, **theme.region_style()
+        )
         self.fit_region.setZValue(_FIT_REGION_Z)
         self.spectrum_plot.addItem(self.fit_region)
         self.residual_plot = plot_widget.addPlot(
@@ -1106,7 +1118,7 @@ class McaPeakAnalysisDialog(QDialog):
             source_document = BUILTIN_RADIONUCLIDE_CATALOG.line_document(reference)
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                item.setForeground(pg.mkBrush(color))
+                item.setForeground(pg.mkBrush(theme.legible_text(color)))
                 item.setToolTip(
                     f"{source_document['reference']}\n"
                     f"{reference.source_dataset or 'catalogue supplement'}\n"

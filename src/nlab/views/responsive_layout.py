@@ -372,27 +372,27 @@ def configure_psu_layout(view: QWidget, ui: Ui_PSUView) -> QScrollArea:
         )
     )
 
-    ui.controlLayout.removeWidget(ui.groupTemp)
-    ui.controlLayout.removeWidget(ui.groupMonitoring)
-    ui.controlLayout.removeItem(ui.verticalSpacer)
-    telemetry_column = QVBoxLayout()
-    telemetry_column.setObjectName("psuTelemetryColumn")
-    telemetry_column.setSpacing(ui.columnsLayout.spacing())
-    telemetry_column.addWidget(ui.groupTemp)
-    telemetry_column.addWidget(ui.groupMonitoring)
-    telemetry_column.addStretch(1)
-    ui.columnsLayout.addLayout(telemetry_column)
-    for column in range(3):
-        ui.columnsLayout.setStretch(column, 1)
+    # One control column beside the plot, as on the Scope tab: the groups stack
+    # at a readable width and the voltage history takes the remaining space.
+    groups = (
+        ui.groupSipm,
+        ui.groupSipmCompens,
+        ui.groupHv,
+        ui.groupHvCompens,
+    )
+    ui.columnLeft.removeWidget(ui.groupSipm)
+    ui.columnLeft.removeWidget(ui.groupSipmCompens)
+    ui.columnRight.removeWidget(ui.groupHv)
+    ui.columnRight.removeWidget(ui.groupHvCompens)
+    ui.controlLayout.removeItem(ui.columnsLayout)
+    ui.columnsLayout.deleteLater()
+    for index, group in enumerate(groups):
+        ui.controlLayout.insertWidget(index, group)
 
     scroll = _wrap_layout(ui.horizontalLayout, ui.controlLayout, "psuControlScroll")
-    ui.horizontalLayout.setDirection(QBoxLayout.Direction.TopToBottom)
-    scroll.setMinimumWidth(0)
-    scroll.setMaximumWidth(16_777_215)
-    scroll.setMinimumHeight(300)
-    scroll.setMaximumHeight(320)
-    scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-    ui.plotHvVoltage.setMinimumSize(300, 220)
+    scroll.setMinimumWidth(300)
+    scroll.setMaximumWidth(460)
+    ui.plotHvVoltage.setMinimumSize(320, 240)
     return scroll
 
 
@@ -432,15 +432,19 @@ def configure_global_layout(view: QWidget, ui: Ui_GlobalView) -> None:
     control_column.addWidget(ui.groupTemperatureCorrection)
     control_column.addStretch(1)
 
+    # Both columns keep their natural width and pack to the left; a wide
+    # window adds empty space on the right instead of spreading each group's
+    # labels and values apart.
     panel_columns = QHBoxLayout()
     panel_columns.setObjectName("globalPanelColumns")
     panel_columns.setSpacing(ui.verticalLayout.spacing())
-    panel_columns.addLayout(control_column, 1)
+    panel_columns.addLayout(control_column, 0)
     panel_columns.addWidget(
         ui.groupDiagnostics,
-        1,
+        0,
         Qt.AlignmentFlag.AlignTop,
     )
+    panel_columns.addStretch(1)
     ui.verticalLayout.addLayout(panel_columns)
     _scroll_layout_contents(ui.verticalLayout, "globalContentScroll")
 

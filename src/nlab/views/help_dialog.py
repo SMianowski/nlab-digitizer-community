@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from nlab.help.content import HelpTopic, load_topics
 from nlab.help.context import HelpContext
 from nlab.help.mathtext import set_help_markdown
+from nlab.views.window_flags import make_tool_window
 
 
 class HelpDialog(QDialog):
@@ -29,8 +30,8 @@ class HelpDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        make_tool_window(self)
         self.setWindowTitle("Nuclear Lab Digitizer — Help")
-        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.setModal(False)
         self.resize(1000, 690)
         screen = self.screen()

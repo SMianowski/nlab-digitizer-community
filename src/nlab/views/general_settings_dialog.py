@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from nlab import settings_keys
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode
+from nlab.views import theme
 
 AUTO_CONFIGURATION_ENABLED_KEY = settings_keys.CONFIGURATION_AUTO_SAVE_ENABLED
 AUTO_CONFIGURATION_DIRECTORY = "device-configurations"
@@ -95,13 +97,29 @@ class GeneralSettingsDialog(QDialog):
         self.setWindowTitle("General Settings")
         self.setMinimumWidth(500)
 
+        appearance_group = QGroupBox("Appearance")
+        appearance_form = QFormLayout(appearance_group)
+        self.theme_combo = QComboBox()
+        for mode in (theme.ThemeMode.LIGHT, theme.ThemeMode.DARK, theme.ThemeMode.CLASSIC):
+            self.theme_combo.addItem(theme.THEME_LABELS[mode], mode.value)
+        theme_index = self.theme_combo.findData(theme.saved_theme_mode().value)
+        self.theme_combo.setCurrentIndex(theme_index if theme_index >= 0 else 0)
+        self.theme_combo.setToolTip(
+            "EWT light and dark follow the Eastern Wall Technologies design system. "
+            "Classic restores the platform's native style and the original colours."
+        )
+        theme_note = QLabel("Applies the next time the application starts.")
+        theme_note.setEnabled(False)
+        appearance_form.addRow("Theme:", self.theme_combo)
+        appearance_form.addRow("", theme_note)
+
         scope_group = QGroupBox("Scope display")
         scope_form = QFormLayout(scope_group)
         self.scope_display_mode = QComboBox()
         self.scope_display_mode.addItem("Persistence", 0)
         self.scope_display_mode.addItem("Raw", 1)
         display_index = self.scope_display_mode.findData(
-            _integer_setting(values, "scope_display_mode", 0)
+            _integer_setting(values, "scope_display_mode", 1)  # Raw is the default.
         )
         self.scope_display_mode.setCurrentIndex(display_index if display_index >= 0 else 0)
         self.scope_display_mode.setToolTip(
@@ -218,11 +236,20 @@ class GeneralSettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
+        layout.addWidget(appearance_group)
         layout.addWidget(scope_group)
         layout.addWidget(acquisition_group)
         layout.addWidget(files_group)
         layout.addWidget(configuration_group)
         layout.addWidget(buttons)
+
+    @property
+    def theme_mode(self) -> theme.ThemeMode:
+        return theme.ThemeMode(str(self.theme_combo.currentData()))
+
+    def accept(self) -> None:
+        theme.save_theme_mode(self.theme_mode)
+        super().accept()
 
     @property
     def auto_configuration_is_enabled(self) -> bool:

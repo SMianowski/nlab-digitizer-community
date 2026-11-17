@@ -35,6 +35,7 @@ from nlab.help.context import HelpContext
 from nlab.views.help_dialog import HelpDialog
 from nlab.views.offline_psd_plot import OfflinePsdPlot
 from nlab.views.tooltips import wrap_tooltip, wrap_widget_tooltips
+from nlab.views.window_flags import make_tool_window
 from nlab.workers.psd_file_worker import PsdFileWorker
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class PsdReadbackDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        make_tool_window(self)
         self._set_current_file(None)
         self.setModal(False)
         self.resize(1180, 760)

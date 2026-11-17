@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEventLoop, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 
 from nlab import __version__
 from nlab.utils.windows_icon import apply_taskbar_icon
 from nlab.views.gui_gc import install_gui_garbage_collector
 from nlab.views.numeric_controls import install_numeric_input_policy
+from nlab.views.theme import apply_application_theme, brand_splash_pixmap, splash_style
 
 if TYPE_CHECKING:
     from nlab.app import MainAppWindow as _MainAppWindow
@@ -167,6 +168,9 @@ def main() -> None:
     app.setApplicationVersion(__version__)
     app.setOrganizationName("EWT")
     app.setOrganizationDomain("ewt.local")  # scopes QSettings on all platforms
+    # The saved theme lives in QSettings, so read it only after the names above
+    # scope QSettings to this application; before that it reads another store.
+    apply_application_theme(app)
 
     if args.check_root_conversion:
         from nlab.utils.root_conversion_check import check_root_conversion
@@ -290,33 +294,7 @@ def _show_connection_splash() -> QSplashScreen:
 
 
 def _create_splash(title: str, message: str) -> QSplashScreen:
-    pixmap = QPixmap(520, 320)
-    pixmap.fill(QColor("#20252b"))
-    logo = QPixmap(":/ewt.png")
-    painter = QPainter(pixmap)
-    try:
-        if logo.isNull():
-            painter.setPen(QColor("#e9f0f6"))
-            painter.setFont(QFont("Sans Serif", 22, QFont.Weight.Bold))
-            painter.drawText(
-                0,
-                35,
-                pixmap.width(),
-                210,
-                Qt.AlignmentFlag.AlignCenter,
-                "Nuclear Lab Digitizer",
-            )
-        else:
-            scaled = logo.scaled(
-                220,
-                220,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            painter.drawPixmap((pixmap.width() - scaled.width()) // 2, 24, scaled)
-    finally:
-        painter.end()
-    splash = QSplashScreen(pixmap, Qt.WindowType.WindowStaysOnTopHint)
+    splash = QSplashScreen(brand_splash_pixmap(), Qt.WindowType.WindowStaysOnTopHint)
     splash.setWindowTitle(title)
     splash.show()
     _update_splash(splash, message)
@@ -327,7 +305,7 @@ def _update_splash(splash: QSplashScreen, message: str) -> None:
     splash.showMessage(
         message,
         Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
-        QColor("#e9f0f6"),
+        QColor(splash_style().message),
     )
     QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
 

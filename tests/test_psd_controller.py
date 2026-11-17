@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QPoint, QRectF, Qt
 from PySide6.QtGui import QKeyEvent
 from pytestqt.qtbot import QtBot
 
@@ -297,4 +298,32 @@ def test_worker_replay_defers_hidden_psd_and_rebins_asynchronously(qtbot: QtBot)
     assert controller._accumulator.statistics.received == 2
     controller.end_session_replay()
     assert controller._session_replay_reconfigure is None
+    controller.stop_processing()
+
+
+def test_live_psd_projections_keep_view_box_parity(qtbot: QtBot) -> None:
+    """Frame-only top/right axes must not break the projections' alignment."""
+    controller = PSDController(McaEventBuffer(), channel=0)
+    qtbot.addWidget(controller)
+    controller.resize(1200, 760)
+    controller.show()
+    qtbot.wait(20)
+
+    def in_window(widget: Any, plot: Any) -> QRectF:
+        # Each plot is its own widget and scene: compare in window coordinates.
+        origin = widget.mapTo(controller, QPoint(0, 0))
+        return plot.getViewBox().sceneBoundingRect().translated(origin.x(), origin.y())
+
+    matrix = in_window(controller.ui.plotPsd, controller._psd_plot)
+    ratio = in_window(controller.ui.plotRatio, controller._ratio_plot)
+    energy = in_window(controller.ui.plotEnergy, controller._energy_plot)
+    # The ratio projection shares the matrix's vertical extent ...
+    assert ratio.top() == pytest.approx(matrix.top())
+    assert ratio.bottom() == pytest.approx(matrix.bottom())
+    # ... and the energy projection its horizontal extent.
+    assert energy.left() == pytest.approx(matrix.left())
+    assert energy.right() == pytest.approx(matrix.right())
+    for plot in (controller._psd_plot, controller._ratio_plot, controller._energy_plot):
+        for side in ("top", "right"):
+            assert not plot.getAxis(side).style["showValues"]
     controller.stop_processing()

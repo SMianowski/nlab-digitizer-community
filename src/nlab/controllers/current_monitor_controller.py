@@ -30,6 +30,7 @@ from nlab.hardware.digitizer.scope import (
 from nlab.ui.ui_current_monitor_view import Ui_CurrentMonitorView
 from nlab.utils.recording_paths import measurement_folder, unique_recording_path
 from nlab.utils.sample_history import SampleHistory
+from nlab.views import theme
 from nlab.views.current_capture_dialog import CurrentCaptureDialog
 from nlab.views.numeric_controls import (
     bind_numeric_control,
@@ -37,7 +38,7 @@ from nlab.views.numeric_controls import (
     normalize_numeric_control,
 )
 from nlab.views.panel_status import PanelStatus
-from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE
+from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE, show_frame_axes
 from nlab.views.spec_binding import bind_spinbox
 from nlab.views.time_axis import time_axis_scale
 from nlab.workers.current_monitor_worker import (
@@ -194,10 +195,9 @@ class CurrentMonitorController(QWidget):
             self.ui.editSumFile.setText(str(Path(text).with_suffix(wanted)))
 
     def _setup_plot(self) -> None:
-        self.ui.plotCurrent.setBackground("#f8f9fa")
+        self.ui.plotCurrent.setBackground(theme.colors().plot_background)
         plot = self.ui.plotCurrent.getPlotItem()
-        plot.showAxis("right")
-        plot.showAxis("top")
+        show_frame_axes(plot)
         plot.showGrid(x=True, y=True, alpha=0.2)
         plot.setLabel("bottom", "Time before newest sample", units="s")
         plot.setLabel("left", "IIR output", units="raw")

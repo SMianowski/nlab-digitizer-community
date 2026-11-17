@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QMenu, QWidget
 
-_PLOT_AREA_BACKGROUND = "#f8f9fa"
+from nlab.views import theme
 
 # pyqtgraph's "right" path holds y[i] from x[i] to x[i+1], then
 # transitions vertically at the next timestamp. Keep x/y arrays unexpanded so
@@ -15,11 +15,41 @@ _PLOT_AREA_BACKGROUND = "#f8f9fa"
 WAVEFORM_STEP_MODE = "right"
 
 
+# Fixed size of a frame-only axis: room for the neighbouring axis's end tick
+# label (half its text height) without clipping. Being the same for every
+# plot, it keeps linked projection plots' view-box edges identical.
+FRAME_AXIS_SIZE = 10
+
+
+def set_frame_only(axis: Any, frame_only: bool) -> None:
+    """Hide (or restore) an axis's values and title, keeping its frame line."""
+    axis.setStyle(showValues=not frame_only)
+    size = FRAME_AXIS_SIZE if frame_only else None
+    if axis.orientation in ("top", "bottom"):
+        axis.setHeight(size)
+    else:
+        axis.setWidth(size)
+    if frame_only:
+        axis.showLabel(False)
+
+
+def show_frame_axes(plot: Any, *sides: str) -> None:
+    """Close the plot frame on ``sides`` (default top and right) without labels.
+
+    These axes mirror the opposite axis, so repeating their tick values and
+    title only adds noise. The axis stays shown for the frame line and tick
+    marks, at ``FRAME_AXIS_SIZE`` on every plot.
+    """
+    for side in sides or ("top", "right"):
+        plot.showAxis(side)
+        set_frame_only(plot.getAxis(side), True)
+
+
 def style_plot_widget(widget: PlotWidget) -> None:
     """Match the plot surround to Qt while retaining a light data canvas."""
     interface_background = widget.palette().color(QPalette.ColorRole.Window)
     widget.setBackground(interface_background)
-    widget.getViewBox().setBackgroundColor(_PLOT_AREA_BACKGROUND)
+    widget.getViewBox().setBackgroundColor(theme.colors().plot_background)
 
 
 class ModifierZoomViewBox(ViewBox):  # type: ignore[misc]

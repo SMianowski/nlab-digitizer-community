@@ -16,6 +16,7 @@ from nlab.controllers.main_window_controller import (
 from nlab.controllers.mca_controller import MCAController
 from nlab.controllers.scope_controller import ScopeController
 from nlab.hardware.digitizer.offline import create_offline_digitizer
+from nlab.views import theme
 
 
 def test_badge_aggregates_controller_signals_across_tabs_and_core_types(
@@ -38,7 +39,7 @@ def test_badge_aggregates_controller_signals_across_tabs_and_core_types(
     initial_width = window.width()
     mca0._set_measurement_active(True)
     assert badge.isVisibleTo(window) and badge.text() == "Measuring: CH0"
-    assert "#2e7d32" in badge.styleSheet()
+    assert badge.styleSheet() == theme.badge_style("active")
     mca1._set_measurement_active(True)
     assert badge.text() == "Measuring: CH0, CH1"
     # Permanent status widget is independent of messages and active tabs.

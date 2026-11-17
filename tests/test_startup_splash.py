@@ -543,6 +543,7 @@ def _prepare_fake_main(monkeypatch: pytest.MonkeyPatch) -> tuple[list[object], M
     )
     monkeypatch.setattr(main_module, "_set_windows_app_user_model_id", lambda: None)
     monkeypatch.setattr(main_module, "apply_taskbar_icon", lambda _window: None)
+    monkeypatch.setattr(main_module, "apply_application_theme", lambda _app: None)
     monkeypatch.setattr(main_module, "QTimer", SimpleNamespace(singleShot=lambda *_args: None))
     monkeypatch.setattr(sys, "argv", ["nlab"])
     return events, first_splash, connection_splash
@@ -575,6 +576,31 @@ def test_connect_shows_second_splash_until_main_window_is_shown(
     assert events.index("dialog-accepted") < events.index("window-construction-started")
     assert events.index(("progress", "Connecting channel 1 of 2...")) < events.index("window-shown")
     assert events.index("window-shown") < events.index("app-exec")
+
+
+def test_theme_is_read_after_qsettings_scope_is_set(
+    monkeypatch: pytest.MonkeyPatch, qapp: QApplication
+) -> None:
+    _prepare_fake_main(monkeypatch)
+    order: list[str] = []
+    fake_app = main_module.QApplication
+    monkeypatch.setattr(
+        fake_app, "setOrganizationName", lambda _self, _name: order.append("organization")
+    )
+    monkeypatch.setattr(
+        fake_app, "setOrganizationDomain", lambda _self, _domain: order.append("domain")
+    )
+    monkeypatch.setattr(
+        main_module, "apply_application_theme", lambda _app: order.append("theme")
+    )
+    monkeypatch.setattr(main_module, "MainAppWindow", lambda **_kwargs: Mock())
+
+    with pytest.raises(SystemExit):
+        main_module.main()
+
+    # The saved theme is a QSettings value: reading it before the organization
+    # scope is set reads a different store and silently falls back to light.
+    assert order == ["organization", "domain", "theme"]
 
 
 def test_connection_failure_closes_second_splash_and_reports_error(

@@ -48,13 +48,13 @@
         <item>
          <widget class="QPushButton" name="btnSoftwareStart">
           <property name="text"><string>Start Armed MCA Channels</string></property>
-          <property name="styleSheet"><string>QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 6px; } QPushButton:disabled { background-color: #A5D6A7; }</string></property>
+          <property name="nlabRole" stdset="0"><string notr="true">start</string></property>
          </widget>
         </item>
         <item>
          <widget class="QPushButton" name="btnSoftwareReset">
           <property name="text"><string>Reset Software Level</string></property>
-          <property name="styleSheet"><string>QPushButton { background-color: #f44336; color: white; font-weight: bold; padding: 6px; } QPushButton:disabled { background-color: #EF9A9A; color: #E0E0E0; }</string></property>
+          <property name="nlabRole" stdset="0"><string notr="true">stop</string></property>
          </widget>
         </item>
        </layout>

@@ -22,7 +22,10 @@ from nlab.hardware.digitizer.iio_listmode import (
     VDPP_ZC_CALC_SCHEMA,
 )
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode
+from nlab.ui.ui_mca_view import Ui_MCAView
+from nlab.ui.ui_scope_view import Ui_ScopeView
 from nlab.utils import recording_paths
+from nlab.views import theme
 from nlab.views.plot_viewbox import ModifierZoomViewBox
 
 
@@ -229,10 +232,19 @@ def test_coincidence_buttons_match_scope_and_mca_color_scheme(
 ) -> None:
     controller, _, _ = _make_controller(monkeypatch)
 
-    assert "background-color: #4CAF50" in controller.btnStart.styleSheet()
-    assert "background-color: #f44336" in controller.btnStop.styleSheet()
-    assert "QPushButton:disabled" in controller.btnStart.styleSheet()
-    assert "QPushButton:disabled" in controller.btnStop.styleSheet()
+    # Scope, MCA and Global tag the same roles in their .ui forms; the
+    # application stylesheet colours every role-tagged button alike.
+    for ui_class in (Ui_ScopeView, Ui_MCAView):
+        view = QWidget()
+        ui = ui_class()
+        ui.setupUi(view)
+        assert ui.btnStart.property(theme.BUTTON_ROLE_PROPERTY) == "start"
+        assert ui.btnStop.property(theme.BUTTON_ROLE_PROPERTY) == "stop"
+        view.deleteLater()
+    assert controller.btnStart.property(theme.BUTTON_ROLE_PROPERTY) == "start"
+    assert controller.btnStop.property(theme.BUTTON_ROLE_PROPERTY) == "stop"
+    assert not controller.btnStart.styleSheet()
+    assert not controller.btnStop.styleSheet()
     assert controller.btnStart.isCheckable()
     assert controller.btnStop.isCheckable()
 

@@ -12,6 +12,7 @@ from nlab.analysis.waveform_file import build_waveform_file_index
 from nlab.analysis.waveform_psd import WaveformPsdAccumulator, WaveformPsdSettings
 from nlab.hardware.digitizer.dma import FILE_HEADER_STRUCT, FILE_MAGIC
 from nlab.help.context import resolve_context
+from nlab.views import theme
 from nlab.views.offline_psd_plot import OfflinePsdPlot
 from nlab.views.waveform_analysis_dialog import WaveformAnalysisDialog
 from nlab.views.waveform_cluster_selection import WaveformClusterSelection
@@ -276,10 +277,11 @@ def test_black_cluster_outline_and_visibility_survive_updates(
     data = (np.arange(10), np.arange(10, dtype=float), np.linspace(-.3, .3, 10))
     selection.set_events(*data)
     selection.add_region(shape)
-    assert selection._roi.pen.color().name() == "#000000"
-    assert selection._roi.hoverPen.color().name() == "#000000"
+    assert selection._roi.pen.color().name().upper() == theme.colors().plot_ink.upper()
+    assert selection._roi.hoverPen.color().name().upper() == theme.colors().plot_ink.upper()
     if shape == "polygon":
-        assert all(seg.pen.color().name() == "#000000" for seg in selection._roi.segments)
+        ink = theme.colors().plot_ink.upper()
+        assert all(seg.pen.color().name().upper() == ink for seg in selection._roi.segments)
     selection.apply_selection()
     original = selection._selected
     selection.set_tools_visible(False)

@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from nlab.views.plot_viewbox import NLabPlotWidget, style_plot_widget
+from nlab.views.window_flags import make_tool_window
 
 _MAX_HISTORY_POINTS = 100_000
 
@@ -31,6 +32,7 @@ class McaRoiHistoryDialog(QDialog):
 
     def __init__(self, channel: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        make_tool_window(self)
         self._channel = int(channel)
         self._region: tuple[int, int] | None = None
         self._differential = False

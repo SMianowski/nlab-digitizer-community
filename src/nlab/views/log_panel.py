@@ -9,6 +9,8 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QWidget
 
+from nlab.views import theme
+
 # Lines arriving within this window are appended in one batch.
 _FLUSH_MS = 50
 # Matches the console's block limit: older lines would be trimmed anyway.
@@ -73,9 +75,7 @@ class LogConsole(QPlainTextEdit):
     logger's level acts as the gate.
     """
 
-    _COLORS: dict[int, str] = {
-        logging.DEBUG:    "#7ec8e3",
-        logging.INFO:     "#d4d4d4",
+    _LEVEL_COLORS: dict[int, str] = {
         logging.WARNING:  "#f0c040",
         logging.ERROR:    "#f04040",
         logging.CRITICAL: "#ff6060",
@@ -90,7 +90,17 @@ class LogConsole(QPlainTextEdit):
         font = QFont("Consolas", 9)
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.setFont(font)
-        self.setStyleSheet("QPlainTextEdit { background:#1e1e1e; color:#d4d4d4; border:none; }")
+        palette = theme.colors()
+        self._colors = {
+            logging.DEBUG: palette.console_debug,
+            logging.INFO: palette.console_text,
+            **self._LEVEL_COLORS,
+        }
+        self._default_color = palette.console_text
+        self.setStyleSheet(
+            f"QPlainTextEdit {{ background: {palette.console_bg}; "
+            f"color: {palette.console_text}; border: none; }}"
+        )
 
         self._flush_timer = QTimer(self)
         self._flush_timer.setSingleShot(True)
@@ -122,7 +132,7 @@ class LogConsole(QPlainTextEdit):
             if new_block:
                 cursor.insertBlock()
             new_block = True
-            color = self._COLORS.get(levelno, "#d4d4d4")
+            color = self._colors.get(levelno, self._default_color)
             cursor.insertHtml(f'<span style="color:{color};">{html.escape(text)}</span>')
         cursor.endEditBlock()
         bar = self.verticalScrollBar()

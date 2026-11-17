@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from nlab.analysis.psd_fom import PsdFomFit, fit_psd_fom_lm, fit_psd_fom_separate_lm
+from nlab.views import theme
 from nlab.views.tooltips import wrap_widget_tooltips
 
 
@@ -315,7 +316,8 @@ class PsdFomWidget(QGroupBox):
         except (RuntimeError, TypeError, ValueError) as error:
             self.clear_fit()
             self._fit_dirty = False
-            self.status_label.setStyleSheet("color: #b42318; font-weight: bold;")
+            error_color = theme.status_color(error=True)
+            self.status_label.setStyleSheet(f"color: {error_color}; font-weight: bold;")
             self.status_label.setText(f"Fit unavailable: {error}")
             return None
 
@@ -331,10 +333,11 @@ class PsdFomWidget(QGroupBox):
         self.copy_button.setEnabled(True)
         if fit.poor_convergence:
             details = "; ".join(fit.warnings) or fit.message
-            self.status_label.setStyleSheet("color: #b54708; font-weight: bold;")
+            warning_color = theme.status_color(warning=True)
+            self.status_label.setStyleSheet(f"color: {warning_color}; font-weight: bold;")
             self.status_label.setText(f"Warning: poor convergence — {details}.")
         else:
-            self.status_label.setStyleSheet("color: #067647;")
+            self.status_label.setStyleSheet(f"color: {theme.colors().status_success};")
             self.status_label.setText(
                 f"Fit converged ({fit.evaluations} evaluations)."
             )

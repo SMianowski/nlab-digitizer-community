@@ -27,6 +27,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Interface reskinned to the Eastern Wall Technologies design system, with a theme
+  choice under **General Settings > Appearance** (applies at the next start):
+  **EWT light** (default), **EWT dark**, or **Classic**, which keeps the native
+  platform style and the original colours. The EWT themes use the bundled Roboto
+  typeface (SIL OFL), the brand ink/blue/cyan palette on flat surfaces, underlined
+  tabs, rounded inputs, group boxes and indicators, and a splash with the EWT
+  colour lockup that follows the theme (white ground in light and Classic, brand
+  ink in dark; the on-dark lockup changes only the wordmark to brand white until
+  an official reversed file exists). Start buttons are brand blue and turn cyan while
+  running; Stop stays red. Every colour now comes from `nlab/views/theme.py`:
+  Start/Stop buttons carry an `nlabRole` property instead of inline stylesheets,
+  and status text, badges, plot canvases, plot guides and the system log read
+  theme roles. Status colours and the dark theme's derived values are checked
+  for WCAG AA contrast in `tests/test_theme.py`, because the design system does not
+  yet define them. Plot data-series colours are unchanged. `NLAB_THEME` overrides
+  the saved theme for one launch.
+- Global tab: the control and diagnostics columns keep their natural width and
+  pack to the left instead of spreading across wide windows.
+- Every tool that opens in its own window (energy and dose calibration, peak
+  analysis, PSD readback, Current Capture Analysis, waveform analysis, timing
+  validation, MCA ROI history, help) has the same minimize, maximize and close
+  buttons as floating channel docks, and no "?" button. Validate Timing now opens
+  as a modeless window like the other tools and keeps its chosen files when
+  reopened.
+- Plots drop the repeated tick values and titles on their top and right axes,
+  which only mirrored the bottom and left ones; the frame line and ticks stay.
+  Every frame-only axis has the same fixed size, so linked projections (PSD
+  matrix with its ratio and energy projections, live and offline; Scope waveform
+  with its distribution) keep identical plot edges. Energy axes (MCA histogram,
+  coincidence matrix, peak analysis) show keV values only when a calibration
+  exists, instead of mirroring channels.
+- Scope Persistence uses a theme colour map whose empty level is the plot
+  background (white to cyan, blue and ink in light; the reverse glow in dark)
+  instead of viridis' solid purple block; Classic keeps viridis. The Raw trace
+  is brand blue in light and cyan in dark (was a low-contrast sky blue).
+- Selection regions (MCA ROI, coincidence ROIs, peak-fit range) use a translucent
+  brand-cyan fill instead of pyqtgraph's default blue. Reference-line table text
+  in Peak Analysis keeps its line colour's hue but is adjusted to stay readable.
+  The energy-calibration point table no longer truncates its column headers.
+- Scope opens in **Raw** display mode by default (was Persistence). A display mode
+  saved for a channel, or set in a configuration file, still takes precedence.
+- Power Supply tab: the SiPM, HV, compensation, temperature and monitoring groups
+  stack in one scrollable column beside the voltage plot, as on the Scope tab,
+  instead of a band of stretched columns above it.
+
 - Current tab: shorter labels with the detail in tooltips. **Start**, **Set
   zero** and **Pause readbacks** replace the longer button texts; the window
   preview reads "= 2.048 µs every 102.048 µs"; the Scope DMA and sum readouts show
