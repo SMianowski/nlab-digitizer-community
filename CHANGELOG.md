@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-11-17
+
+Interface reskin to the Eastern Wall Technologies design system, with EWT light,
+EWT dark and Classic themes under General Settings > Appearance.
+
 ### Added
 
 - Current periodic sums can record to a compact binary file: **Record** now has a
