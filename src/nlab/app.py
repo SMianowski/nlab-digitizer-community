@@ -113,6 +113,9 @@ class MainAppWindow(QMainWindow):
         self._offline = bool(offline)
         self._closing = False
         self._connection_busy = False
+        # One reconnect prompt per lost connection: every panel polling the
+        # dead board reports the loss within a second or two.
+        self._connection_loss_prompted = False
         self._modbus_refresh_running = False
         self._screen_change_connected = False
         self._timing_validation_dialog: TimingValidationDialog | None = None
@@ -360,6 +363,8 @@ class MainAppWindow(QMainWindow):
 
     def _sync_connection_presentation(self) -> None:
         """Refresh mirrored window state from the controller's topology."""
+        # Fresh panels on fresh connections: a later loss deserves a new prompt.
+        self._connection_loss_prompted = False
         self._offline = self._controller.offline
         self._channels = self._controller.channel_count
         endpoints = self._controller.endpoint_descriptions
@@ -1281,6 +1286,46 @@ class MainAppWindow(QMainWindow):
                 ),
             )
 
+    def notify_connection_lost(self, source: str, message: str) -> None:
+        """Offer one reconnect when a panel reports that the board connection is gone."""
+        if (
+            self._offline
+            or self._connection_busy
+            or self._modbus_refresh_running
+            or self._connection_loss_prompted
+        ):
+            return
+        self._connection_loss_prompted = True
+        logging.getLogger(__name__).warning(
+            "Board connection lost (%s): %s", source, message,
+        )
+        # Leave the reporting panel's signal handler before a modal dialog runs.
+        QTimer.singleShot(0, lambda: self._offer_reconnect_after_loss(f"{source}: {message}"))
+
+    def _offer_reconnect_after_loss(self, detail: str) -> None:
+        while self._ask_reconnect_after_loss(detail):
+            error = self._reconnect_device()
+            if error is None:
+                return
+            detail = f"Reconnect failed: {error}"
+
+    def _ask_reconnect_after_loss(self, detail: str) -> bool:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Connection Lost")
+        box.setText("The connection to the digitizer was lost.")
+        box.setInformativeText(
+            f"{detail}\n\n"
+            "Polling and acquisition on the lost connection have stopped. Reconnecting "
+            "stops all running measurements and replaces every board connection. You "
+            "can also reconnect later with Connection → Reconnect Device."
+        )
+        reconnect = box.addButton("Reconnect", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Not Now", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(reconnect)
+        box.exec()
+        return box.clickedButton() is reconnect
+
     def _on_reconnect_device(self) -> None:
         if self._connection_busy or self._modbus_refresh_running:
             return
@@ -1293,7 +1338,14 @@ class MainAppWindow(QMainWindow):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
+        error = self._reconnect_device()
+        if error is not None:
+            QMessageBox.critical(self, "Reconnect Failed", error)
 
+    def _reconnect_device(self) -> str | None:
+        """Replace every board connection; return the error message on failure."""
+        if self._connection_busy or self._modbus_refresh_running:
+            return "another connection operation is in progress"
         progress = ConnectionProgressDialog(
             "Reconnecting Digitizers",
             "Preparing replacement connections...",
@@ -1313,8 +1365,7 @@ class MainAppWindow(QMainWindow):
             progress.close()
             self._set_connection_busy(False)
             self._sync_replay_indicator()
-            QMessageBox.critical(self, "Reconnect Failed", str(exc))
-            return
+            return str(exc)
 
         self._sync_connection_presentation()
         settings_error = self._apply_post_connection_settings(
@@ -1333,6 +1384,7 @@ class MainAppWindow(QMainWindow):
             )
         else:
             QMessageBox.information(self, "Reconnect", "Device reconnected successfully.")
+        return None
 
     def _on_refresh_modbus_devices(self) -> None:
         """Start a non-blocking scan of both digitizer ser2net bridges."""

@@ -146,6 +146,8 @@ class ScopeController(QWidget):
     current_dma_state_changed = Signal(bool, str)
     session_viewer_frame = Signal(int, object, int)
     measurement_active_changed = Signal(bool)
+    connection_lost = Signal(str)
+    """The board connection was lost; carries the transport error message."""
 
     def __init__(
         self,
@@ -1728,6 +1730,7 @@ class ScopeController(QWidget):
             return
         self._acquiring = True
         worker = ScopeWorker(self._viewer_scope_for_worker)
+        worker.signals.failed.connect(self._on_viewer_frame_failed)
         worker.signals.ready.connect(self._on_viewer_frame_received)
         QThreadPool.globalInstance().start(worker)
 
@@ -1771,6 +1774,43 @@ class ScopeController(QWidget):
             self._viewer_scope = None
         if viewer_scope is not None:
             viewer_scope.close()
+
+    @Slot(str, bool)
+    def _on_viewer_frame_failed(self, message: str, connection_lost: bool) -> None:
+        """Stop live viewing once the board connection is gone, without hardware writes.
+
+        A reset network context never recovers, so requesting further frames
+        would only repeat the failure at the refresh rate. The normal Stop path
+        writes ``enable=0`` and would fail the same way; a DMA session keeps
+        its own reader-process teardown.
+        """
+        if (
+            not connection_lost
+            or getattr(self, "_session_replay_active", False)
+            or not self._refresh_timer.isActive()
+        ):
+            return
+        self._refresh_timer.stop()
+        self._discard_inflight_frame = True
+        self._acquiring = False
+        if self._dma_worker is None:
+            self._raw_curve.cancelDrag()
+            self._cancel_pretrigger_line_drag()
+            self._measurement_timer.stop()
+            ScopeController._set_measurement_active(self, False)
+            self.ui.btnStop.setChecked(True)
+            self.ui.btnStart.setChecked(False)
+            self.ui.btnStart.setEnabled(True)
+            self.ui.btnStop.setEnabled(False)
+            self.ui.btnAcquireFrame.setEnabled(True)
+            self.ui.cbDmaEnable.setEnabled(True)
+            self.ui.btnDmaFile.setEnabled(True)
+        self.status.setText(
+            f"Connection lost: {message}; use Connection → Reconnect Device."
+        )
+        log.warning("Scope ch%d: live view stopped after the board connection was lost",
+                    self._channel)
+        self.connection_lost.emit(message)
 
     @Slot(object)
     def _on_viewer_frame_received(self, data: list[np.ndarray] | None) -> None:

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QTimer, Signal, Slot
 
 from nlab.hardware.digitizer.hv import HVSupply
+from nlab.utils.transport_errors import is_fatal_transport_error
 from nlab.workers.base_worker import BaseWorker
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ class PSUWorker(BaseWorker):
         self._interval_ms = interval_ms
         self._t0 = 0.0
         self._timer: QTimer | None = None
+        self._finished = False
 
     def run(self) -> None:
         self._t0 = time.monotonic()
@@ -68,6 +70,9 @@ class PSUWorker(BaseWorker):
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
+        if self._finished:
+            return
+        self._finished = True
         self.finished.emit()
 
     @Slot(int)
@@ -77,6 +82,8 @@ class PSUWorker(BaseWorker):
             self._timer.setInterval(ms)
 
     def _tick(self) -> None:
+        if self._finished:
+            return
         now = time.monotonic() - self._t0
         try:
             rb = PSUReadback(
@@ -93,7 +100,16 @@ class PSUWorker(BaseWorker):
                 rb.sipm_current = self._hv.get_sipm_adc_current()
                 rb.sipm_overload = self._hv.get_sipm_overload()
                 rb.sipm_compens_output = self._hv.get_sipm_compens_output()
-        except Exception:
-            log.exception("PSU readback failed")
+        except Exception as exc:
+            # A reset or aborted IIO network connection does not recover; keep
+            # polling it and every tick logs the same traceback until reconnect.
+            connection_lost = is_fatal_transport_error(exc)
+            if connection_lost:
+                log.exception("PSU connection lost; stopping readback worker")
+            else:
+                log.exception("PSU readback failed")
+            self.error.emit(str(exc))
+            if connection_lost:
+                self._stop()
             return
         self.readback.emit(rb)

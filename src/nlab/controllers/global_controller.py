@@ -38,6 +38,8 @@ class GlobalController(QWidget):
     _TEMPERATURE_ENABLED_SETTINGS_KEY = settings_keys.GLOBAL_TEMPERATURE_ENABLED
     session_temperature_readback = Signal(object)
     session_diagnostics_readback = Signal(object)
+    connection_lost = Signal(str)
+    """The board connection was lost; carries the transport error message."""
 
     def __init__(
         self,
@@ -377,6 +379,7 @@ class GlobalController(QWidget):
         self._session_replay_active = False
 
     def _on_temperature_error(self, message: str) -> None:
+        self._last_temperature_error = message
         self._set_temperature_status(
             f"Temperature-correction cycle failed: {message}",
             error=True,
@@ -385,9 +388,15 @@ class GlobalController(QWidget):
     def _on_temperature_finished(self, thread: QThread) -> None:
         if thread is not self._temperature_worker_thread:
             return  # an earlier worker; a restarted one is running
+        stopped_by_worker = not self._temperature_worker_stop_requested
         self._temperature_worker = None
         self._temperature_worker_thread = None
         self._temperature_worker_stop_requested = False
+        if stopped_by_worker:
+            self.connection_lost.emit(
+                getattr(self, "_last_temperature_error", "")
+                or "temperature-correction loop stopped"
+            )
 
     def _stop_temperature_correction_sync(self) -> None:
         thread = self._temperature_worker_thread
@@ -792,15 +801,22 @@ class GlobalController(QWidget):
         return f"{reading.value:,}"
 
     def _on_diagnostics_error(self, message: str) -> None:
+        self._last_diagnostics_error = message
         self.ui.lblLastUpdate.setText(f"Read error: {message}")
         self.ui.lblLastUpdate.setStyleSheet(f"color: {theme.colors().status_error};")
 
     def _on_diagnostics_finished(self, thread: QThread) -> None:
         if thread is not self._worker_thread:
             return  # an earlier worker; a restarted one is running
+        stopped_by_worker = not self._worker_stop_requested
         self._worker = None
         self._worker_thread = None
         self._worker_stop_requested = False
+        if stopped_by_worker:
+            # The worker only ends itself when the board connection is gone.
+            self.connection_lost.emit(
+                getattr(self, "_last_diagnostics_error", "") or "diagnostics readback stopped"
+            )
 
     def _stop_diagnostics_sync(self) -> None:
         thread = self._worker_thread

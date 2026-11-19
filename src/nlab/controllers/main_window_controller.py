@@ -406,6 +406,12 @@ class MainWindowController:
         if signal is not None:
             signal.connect(slot)
 
+    def _report_connection_lost(self, source: str, message: str) -> None:
+        """Let the main window offer a reconnect when a panel loses its board."""
+        notify = getattr(self._window, "notify_connection_lost", None)
+        if callable(notify):
+            notify(source, message)
+
     def _make_dock(self, obj_name: str, title: str, widget: QWidget) -> QDockWidget:
         dock = PanelDockWidget(title)
         dock.setObjectName(obj_name)
@@ -528,6 +534,11 @@ class MainWindowController:
             self._connect_optional_signal(
                 scope_ctrl, "measurement_active_changed", self._measurement_state_changed,
             )
+            self._connect_optional_signal(
+                scope_ctrl,
+                "connection_lost",
+                partial(self._report_connection_lost, f"Scope {ch_label}"),
+            )
             scope_docks.append(self._make_dock(f"scope_ch{ch}", ch_label, scope_ctrl))
 
             if device.capabilities.mca:
@@ -573,6 +584,11 @@ class MainWindowController:
                 self._connect_optional_signal(
                     mca_ctrl, "measurement_active_changed", self._measurement_state_changed,
                 )
+                self._connect_optional_signal(
+                    mca_ctrl,
+                    "connection_lost",
+                    partial(self._report_connection_lost, f"MCA {ch_label}"),
+                )
                 calibration_indicator_slot = getattr(
                     self._window,
                     "refresh_energy_calibration_indicator",
@@ -605,6 +621,11 @@ class MainWindowController:
                     psu_ctrl,
                     "session_readback",
                     partial(self._record_psu_readback, ch),
+                )
+                self._connect_optional_signal(
+                    psu_ctrl,
+                    "connection_lost",
+                    partial(self._report_connection_lost, f"PSU {ch_label}"),
                 )
                 self._psu_controllers.append(psu_ctrl)
                 self._psu_controller_by_device[idx] = psu_ctrl
@@ -690,6 +711,11 @@ class MainWindowController:
             labels = [self._channel_label(index) for index in indices]
             controller = GlobalController(devices, labels)
             self._global_controllers.append(controller)
+            self._connect_optional_signal(
+                controller,
+                "connection_lost",
+                partial(self._report_connection_lost, f"Global D{digitizer + 1}"),
+            )
             self._global_controller_by_digitizer[digitizer] = controller
             if digitizer == 0:
                 self._connect_optional_signal(

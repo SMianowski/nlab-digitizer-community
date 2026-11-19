@@ -9,12 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Reconnect prompt after a lost board connection** — when the Scope live view,
+  MCA polling or list-mode DMA, PSU monitoring or a Global diagnostics or
+  temperature loop loses the board connection, the application shows one
+  **Connection Lost** message with **Reconnect** and **Not Now**. Reconnect replaces
+  every board connection like Connection → Reconnect Device, without a second
+  confirmation, and offers another attempt if it fails. Further reports of the
+  same loss do not reopen the message.
+
 ### Removed
 
 - **Remote board reboot and shutdown** — the Developer menu no longer offers Reboot
   Remote Board or Shut Down Remote Board. They needed an OpenSSH client, a dedicated
   restricted account and key on the board, and a command dispatcher there; reboot
   or power off the board directly instead.
+
+### Fixed
+
+- **PSU monitoring and Scope live view after a lost board connection** — when the
+  network connection to the board was reset (Windows error 10054), PSU monitoring
+  kept polling the dead IIO context and logged the same traceback every second.
+  The Scope live view did the same at its refresh rate. Both now stop after the
+  first failure, like the MCA and global readback workers, report the loss in
+  their panel, and leave Start available again.
 
 ## [0.9.1] — 2026-11-17
 

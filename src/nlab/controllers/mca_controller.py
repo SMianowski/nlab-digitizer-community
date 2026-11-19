@@ -184,6 +184,8 @@ class MCAController(QWidget):
     """View + controller for a single MultiChannelAnalyzer channel."""
 
     roi_changed = Signal()
+    connection_lost = Signal(str)
+    """The board connection was lost; carries the transport error message."""
     roi_preview_changed = Signal()
     coincidence_ready = Signal(int)
     coincidence_finished = Signal(int)
@@ -2220,6 +2222,9 @@ class MCAController(QWidget):
         self.status.setText(
             f"Connection lost: {message}; use Connection -> Reconnect Device."
         )
+        signal = getattr(self, "connection_lost", None)
+        if signal is not None:
+            signal.emit(message)
 
     def _stop_worker(self) -> None:
         if self._worker is not None:

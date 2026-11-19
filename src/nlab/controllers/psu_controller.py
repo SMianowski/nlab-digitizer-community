@@ -14,6 +14,7 @@ from nlab.hardware.digitizer.hv import HV_PARAMETER_SPECS, HVParam, HVSupply
 from nlab.hardware.digitizer.scope import RangeSpec, choice_default, range_spec
 from nlab.ui.ui_psu_view import Ui_PSUView
 from nlab.views import theme
+from nlab.views.panel_status import PanelStatus
 from nlab.views.responsive_layout import configure_psu_layout
 from nlab.views.spec_binding import bind_double_spinbox
 from nlab.workers.base_worker import pause_requests
@@ -39,10 +40,14 @@ class PSUController(QWidget):
     """
 
     session_readback = Signal(object)
+    connection_lost = Signal(str)
+    """The board connection was lost; carries the transport error message."""
 
     def __init__(self, hv: HVSupply, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.hv = hv
+        self.status = PanelStatus(self)
+        self._last_monitor_error = ""
         self.ui = Ui_PSUView()
         self.ui.setupUi(self)
         self._control_scroll = configure_psu_layout(self, self.ui)
@@ -293,9 +298,11 @@ class PSUController(QWidget):
             self, self._worker, on_finished=self._on_monitor_finished,
         )
         self._worker.readback.connect(self._on_readback)
+        self._worker.error.connect(self._on_monitor_error)
 
         self.ui.btnStartMonitor.setEnabled(False)
         self.ui.btnStopMonitor.setEnabled(True)
+        self.status.setText("")
         self._worker_thread.start()
         log.info(
             "PSU: monitoring started (interval %d ms, sipm=%s)", interval_ms, self._sipm_available
@@ -320,12 +327,28 @@ class PSUController(QWidget):
         self.ui.btnStopMonitor.setEnabled(False)
         log.info("PSU: monitoring stop requested")
 
+    def _on_monitor_error(self, message: str) -> None:
+        self._last_monitor_error = message
+        self.status.setText(f"PSU readback failed: {message}")
+
     def _on_monitor_finished(self, thread: QThread) -> None:
         if thread is not self._worker_thread:
             return  # an earlier monitor; a restarted one is running
+        stopped_by_worker = not self._worker_stop_requested
         self._worker = None
         self._worker_thread = None
         self._worker_stop_requested = False
+        if stopped_by_worker:
+            # The worker only ends itself when the board connection is gone.
+            self.ui.btnStartMonitor.setEnabled(True)
+            self.ui.btnStopMonitor.setEnabled(False)
+            self.status.setText(
+                "PSU monitoring stopped: the connection to the board was lost. "
+                "Use Connection → Reconnect Device to resume."
+            )
+            log.warning("PSU: monitoring stopped after the board connection was lost")
+            self.connection_lost.emit(self._last_monitor_error or "PSU readback stopped")
+            return
         log.info("PSU: monitoring stopped")
 
     def request_monitor_stop(self) -> None:

@@ -42,6 +42,16 @@ workspace, **Add Digitizer…** adds an independent board. A shared GUI does not
 give independent boards a synchronized clock. Stop affected acquisitions before
 disconnecting or reconnecting a board.
 
+If the network connection to a board is lost (for example after a board reboot
+or a cable fault), the Scope live view, MCA polling and list-mode DMA, PSU
+monitoring and the Global loops stop instead of retrying a connection that
+cannot recover. One **Connection Lost** message then offers **Reconnect**, which
+replaces every board connection like **Connection → Reconnect Device** but
+without asking again; if that fails, the message offers another attempt.
+**Not Now** leaves everything stopped; reconnect later from the Connection menu.
+A board that rebooted may have lost its configuration, so check the settings
+before measuring again.
+
 See [session replay](#session) and [acquisition ownership](#ownership).
 
 ## Acquisition — ownership and safe configuration {#ownership}

@@ -7,6 +7,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QRunnable, Signal
 
 from nlab.hardware.digitizer.scope import SCOPE_DATAPATH_CLOCK_PERIOD_NS, Scope
+from nlab.utils.transport_errors import is_fatal_transport_error
 
 log = logging.getLogger(__name__)
 
@@ -15,6 +16,8 @@ _VIEWER_POINT_PERIOD_NS = SCOPE_DATAPATH_CLOCK_PERIOD_NS
 
 class _FrameSignals(QObject):
     ready = Signal(object)
+    # Scalar error data only (message, connection lost): see AGENTS.md.
+    failed = Signal(str, bool)
 
 
 class ScopeWorker(QRunnable):
@@ -41,6 +44,12 @@ class ScopeWorker(QRunnable):
             frame = raw_frame[: int(frame_samples) // 4]
             raw_time = np.arange(len(frame)) * _VIEWER_POINT_PERIOD_NS
             self.signals.ready.emit([raw_time, frame])
-        except Exception:
-            log.exception("Frame acquisition failed")
+        except Exception as exc:
+            connection_lost = is_fatal_transport_error(exc)
+            log.exception(
+                "Frame acquisition failed; connection lost"
+                if connection_lost
+                else "Frame acquisition failed"
+            )
+            self.signals.failed.emit(str(exc), connection_lost)
             self.signals.ready.emit(None)

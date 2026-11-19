@@ -171,3 +171,41 @@ def test_hv_api_rejects_voltage_outside_operating_range(voltage: float) -> None:
         HVSupply(backend).set_hv_voltage(voltage)
 
     backend.set_hv_voltage.assert_not_called()
+
+
+def test_monitor_stops_and_reports_when_the_board_connection_is_lost(
+    psu: tuple[PSUController, MagicMock],
+    qtbot: QtBot,
+) -> None:
+    controller, backend = psu
+    backend.get_hv_adc_voltage.side_effect = ConnectionResetError(10054, "Unknown error")
+    lost: list[str] = []
+    controller.connection_lost.connect(lost.append)
+
+    controller.ui.btnStartMonitor.click()
+    qtbot.waitUntil(lambda: controller._worker_thread is None, timeout=5_000)
+
+    assert backend.get_hv_adc_voltage.call_count == 1
+    assert controller.ui.btnStartMonitor.isEnabled()
+    assert not controller.ui.btnStopMonitor.isEnabled()
+    assert "connection to the board was lost" in controller.status.text()
+    assert lost == ["[Errno 10054] Unknown error"]
+
+
+def test_requested_monitor_stop_does_not_report_a_lost_connection(
+    psu: tuple[PSUController, MagicMock],
+    qtbot: QtBot,
+) -> None:
+    controller, backend = psu
+    lost: list[str] = []
+    controller.connection_lost.connect(lost.append)
+    controller.ui.btnStartMonitor.click()
+    # Stop only once the worker is polling; run() connects request_stop.
+    qtbot.waitUntil(lambda: backend.get_hv_adc_voltage.called, timeout=5_000)
+
+    controller.ui.btnStopMonitor.click()
+    qtbot.waitUntil(lambda: controller._worker_thread is None, timeout=5_000)
+
+    assert controller.status.text() == ""
+    assert lost == []
+    assert controller.ui.btnStartMonitor.isEnabled()
