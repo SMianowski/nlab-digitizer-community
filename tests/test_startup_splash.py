@@ -84,8 +84,6 @@ def test_offline_window_is_identified_and_hardware_actions_are_disabled(
         window.ui.actionDisconnectDevice,
         window.ui.actionReconnectDevice,
         window.ui.actionRefreshModbus,
-        window.ui.actionRebootBoard,
-        window.ui.actionShutdownBoard,
     ):
         assert not action.isEnabled()
     assert factory.call_args.kwargs["offline"] is True

@@ -74,8 +74,6 @@ def test_replay_indicator_is_persistent_and_warns_that_hardware_is_live(
                 "actionRefreshModbus",
                 "actionLoadSettings",
                 "actionGeneralSettings",
-                "actionRebootBoard",
-                "actionShutdownBoard",
             ):
                 action = QAction(self)
                 action.setObjectName(name)

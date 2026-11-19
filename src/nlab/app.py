@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import cast
 
-from PySide6.QtCore import QEvent, QObject, QProcess, QSettings, QStandardPaths, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QIcon, QKeyEvent, QMouseEvent, QScreen, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -26,11 +26,6 @@ from nlab.help.controller import HelpController
 from nlab.session.replay import SessionReplay
 from nlab.ui.ui_main_window import Ui_MainWindow
 from nlab.utils.github_releases import GITHUB_REPOSITORY_URL
-from nlab.utils.remote_board_power import (
-    BoardPowerCommand,
-    power_command_was_delivered,
-    ssh_arguments,
-)
 from nlab.views import theme
 from nlab.views.about_dialog import AboutDialog
 from nlab.views.app_events import application_event_hub
@@ -120,9 +115,6 @@ class MainAppWindow(QMainWindow):
         self._connection_busy = False
         self._modbus_refresh_running = False
         self._screen_change_connected = False
-        self._board_power_process: QProcess | None = None
-        self._board_power_command: BoardPowerCommand | None = None
-        self._board_power_phase: str | None = None
         self._timing_validation_dialog: TimingValidationDialog | None = None
         self._base_window_title = (
             "Nuclear Lab Digitizer — Offline"
@@ -272,8 +264,6 @@ class MainAppWindow(QMainWindow):
         self.ui.actionThirdPartyLicenses.triggered.connect(self._on_third_party_licenses)
         self.ui.actionShowSystemLog.toggled.connect(self._on_show_system_log_toggled)
         self.ui.actionDebugMode.toggled.connect(self._on_debug_mode_toggled)
-        self.ui.actionRebootBoard.triggered.connect(self._on_reboot_board)
-        self.ui.actionShutdownBoard.triggered.connect(self._on_shutdown_board)
 
         self._replay_indicator = QLabel(self)
         self._replay_indicator.setObjectName("replayModeIndicator")
@@ -356,9 +346,6 @@ class MainAppWindow(QMainWindow):
             action = getattr(self.ui, action_name, None)
             if action is not None:
                 action.setEnabled(live and available)
-        remote_power_enabled = live and available and bool(self._host.strip())
-        self.ui.actionRebootBoard.setEnabled(remote_power_enabled)
-        self.ui.actionShutdownBoard.setEnabled(remote_power_enabled)
         self.ui.actionReconnectDevice.setToolTip(
             "Re-establish the current digitizer connection."
             if live
@@ -742,8 +729,6 @@ class MainAppWindow(QMainWindow):
             "actionRefreshModbus",
             "actionLoadSettings",
             "actionGeneralSettings",
-            "actionRebootBoard",
-            "actionShutdownBoard",
         )
         actions = [
             action
@@ -919,190 +904,6 @@ class MainAppWindow(QMainWindow):
         )
         if checked and not self.ui.actionShowSystemLog.isChecked():
             self.ui.actionShowSystemLog.setChecked(True)
-
-    def _on_reboot_board(self) -> None:
-        self._request_board_power_action("reboot")
-
-    def _on_shutdown_board(self) -> None:
-        self._request_board_power_action("shutdown")
-
-    def _request_board_power_action(self, command: BoardPowerCommand) -> None:
-        if self._board_power_process is not None:
-            QMessageBox.information(
-                self,
-                "Remote Board",
-                "A remote board power request is already running.",
-            )
-            return
-
-        if command == "reboot":
-            title = "Reboot Remote Board"
-            prompt = (
-                f"Stop all measurements and reboot {self._host}?\n\n"
-                "The application will remain disconnected until the board has "
-                "booted and Reconnect Device is selected."
-            )
-        else:
-            title = "Shut Down Remote Board"
-            prompt = (
-                f"Stop all measurements and power off {self._host}?\n\n"
-                "The board will remain unavailable until its power is restored."
-            )
-
-        reply = QMessageBox.warning(
-            self,
-            title,
-            prompt,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        key_path = Path.home() / ".ssh" / "nlab_board_power_ed25519"
-        if not key_path.is_file():
-            QMessageBox.critical(
-                self,
-                title,
-                f"SSH key not found:\n{key_path}\n\n"
-                "Create the restricted nlab-reboot key before using this action.",
-            )
-            return
-
-        ssh_program = QStandardPaths.findExecutable("ssh")
-        if not ssh_program:
-            QMessageBox.critical(
-                self,
-                title,
-                "OpenSSH client 'ssh' was not found in PATH.",
-            )
-            return
-
-        self._board_power_command = command
-        self._board_power_phase = "check"
-        self._set_board_power_actions_enabled(False)
-        self.statusBar().showMessage(f"Checking remote power access to {self._host}...")
-        self._start_board_ssh_process(ssh_program, key_path, "check")
-
-    def _start_board_ssh_process(
-        self,
-        ssh_program: str,
-        key_path: Path,
-        remote_command: str,
-    ) -> None:
-        process = QProcess(self)
-        process.setProgram(ssh_program)
-        process.setArguments(ssh_arguments(self._host, key_path, remote_command))
-        process.finished.connect(self._on_board_ssh_finished)
-        process.errorOccurred.connect(self._on_board_ssh_error)
-        self._board_power_process = process
-        process.start()
-
-    def _on_board_ssh_finished(
-        self,
-        exit_code: int,
-        exit_status: QProcess.ExitStatus,
-    ) -> None:
-        process = self._board_power_process
-        if process is None:
-            return
-
-        stdout = bytes(process.readAllStandardOutput().data()).decode(errors="replace").strip()
-        stderr = bytes(process.readAllStandardError().data()).decode(errors="replace").strip()
-        phase = self._board_power_phase
-        command = self._board_power_command
-        ssh_program = process.program()
-        key_path = Path.home() / ".ssh" / "nlab_board_power_ed25519"
-        process.deleteLater()
-        self._board_power_process = None
-
-        if phase == "check":
-            check_ok = (
-                exit_status == QProcess.ExitStatus.NormalExit
-                and exit_code == 0
-                and "nlab-power-command: READY" in stdout
-            )
-            if not check_ok or command is None:
-                detail = stderr or stdout or f"ssh exited with code {exit_code}"
-                self._finish_board_power_request(
-                    error=f"Remote power access check failed:\n{detail}",
-                )
-                return
-
-            try:
-                self._controller.prepare_for_remote_power_action()
-            except Exception as exc:
-                logging.getLogger(__name__).exception(
-                    "Failed to stop acquisition before remote board power action"
-                )
-                self._finish_board_power_request(
-                    error=f"Could not stop active measurements safely:\n{exc}",
-                )
-                return
-
-            self.ui.mainTabs.setEnabled(False)
-            self._board_power_phase = "command"
-            self.statusBar().showMessage(f"Sending {command} command to {self._host}...")
-            self._start_board_ssh_process(ssh_program, key_path, command)
-            return
-
-        delivered = exit_status == QProcess.ExitStatus.NormalExit and power_command_was_delivered(
-            exit_code, stderr
-        )
-        if not delivered or command is None:
-            detail = stderr or stdout or f"ssh exited with code {exit_code}"
-            self._finish_board_power_request(
-                error=f"Remote board command failed:\n{detail}\n\n"
-                "Acquisition is stopped; use Reconnect Device before continuing.",
-            )
-            return
-
-        if command == "reboot":
-            message = (
-                "Reboot command was sent. Wait for the board to boot, then select "
-                "File > Reconnect Device."
-            )
-        else:
-            message = (
-                "Shutdown command was sent. Restore board power before using Reconnect Device."
-            )
-        logging.getLogger(__name__).info("Remote board %s command delivered", command)
-        self._finish_board_power_request(message=message)
-
-    def _on_board_ssh_error(self, error: QProcess.ProcessError) -> None:
-        if error != QProcess.ProcessError.FailedToStart:
-            return
-        process = self._board_power_process
-        detail = process.errorString() if process is not None else "unknown process error"
-        if process is not None:
-            process.deleteLater()
-        self._board_power_process = None
-        self._finish_board_power_request(error=f"Could not start ssh:\n{detail}")
-
-    def _finish_board_power_request(
-        self,
-        *,
-        message: str | None = None,
-        error: str | None = None,
-    ) -> None:
-        command = self._board_power_command
-        self._board_power_command = None
-        self._board_power_phase = None
-        self._set_board_power_actions_enabled(bool(self._host.strip()))
-        self.statusBar().clearMessage()
-
-        title = "Remote Board"
-        if error is not None:
-            logging.getLogger(__name__).error("Remote board power request failed: %s", error)
-            QMessageBox.critical(self, title, error)
-        elif message is not None:
-            action = command or "power"
-            self.statusBar().showMessage(f"Remote board {action} requested", 10000)
-            QMessageBox.information(self, title, message)
-
-    def _set_board_power_actions_enabled(self, enabled: bool) -> None:
-        self.ui.actionRebootBoard.setEnabled(enabled)
-        self.ui.actionShutdownBoard.setEnabled(enabled)
 
     def _on_convert_to_hdf5(self) -> None:
         from nlab.utils.dma_converter import convert_listmode, convert_scope, read_file_header

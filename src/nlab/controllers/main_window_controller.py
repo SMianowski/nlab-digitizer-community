@@ -1701,21 +1701,6 @@ class MainWindowController:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def prepare_for_remote_power_action(self) -> None:
-        """Stop acquisition cleanly before the board is rebooted or powered off.
-
-        Device handles deliberately remain open until reconnect/shutdown. With
-        all polling and DMA threads stopped they cannot issue requests while
-        Dropbear executes the power command, and ``reconnect()`` can dispose of
-        the old handles through its normal teardown path after the board boots.
-        """
-        log.info("Remote board power action: stopping all acquisition workers")
-        self._save_dock_state()
-        for ctrl in self._scope_controllers:
-            ctrl.save_display_settings()
-        self._stop_all_workers()
-        log.info("Remote board power action: acquisition stopped")
-
     def _all_global_controllers(self) -> list[GlobalController]:
         controllers = getattr(self, "_global_controllers", None)
         if controllers is not None:

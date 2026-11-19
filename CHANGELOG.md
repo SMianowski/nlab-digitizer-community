@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Remote board reboot and shutdown** — the Developer menu no longer offers Reboot
+  Remote Board or Shut Down Remote Board. They needed an OpenSSH client, a dedicated
+  restricted account and key on the board, and a command dispatcher there; reboot
+  or power off the board directly instead.
+
 ## [0.9.1] — 2026-11-17
 
 Interface reskin to the Eastern Wall Technologies design system, with EWT light,
