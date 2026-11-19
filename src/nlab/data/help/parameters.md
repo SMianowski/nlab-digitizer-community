@@ -206,6 +206,14 @@ Raw Scope display emphasizes the current waveform; persistence accumulates
 the visual history with the configured retention. History duration controls
 how much monitoring data remains visible.
 
+**General Settings → Appearance → Waveforms** draws sampled waveforms (Scope
+trace, MCA debug traces, Current raw pulses and Waveform Analysis) either as
+**Steps**, holding each sample until the next one (the default), or as
+**Lines** joining consecutive samples directly. It applies immediately and
+changes only the drawing: the samples, cursors and recorded data are the same.
+The Scope persistence image and the MCA charge-comparison gate guide always use
+steps.
+
 Linear/logarithmic scaling changes presentation, not raw recorded values or
 calibration. Sparse zero bins may be transparent on logarithmic images. In MCA,
 the View menu controls logarithmic Y; hovering its plot and pressing L also

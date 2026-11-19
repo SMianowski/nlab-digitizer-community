@@ -47,6 +47,27 @@ def _collect_garbage_between_tests() -> Generator[None, None, None]:
         collector.check()
 
 
+@pytest.fixture(autouse=True)
+def isolated_waveform_drawing(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Keep the waveform-drawing preference in memory for each test.
+
+    Every Scope, MCA and Waveform Analysis view reads it on construction, so
+    a "lines" choice saved while using the application would otherwise change
+    what the tests draw, and a test accepting General Settings would write it.
+    """
+    from types import SimpleNamespace
+
+    from nlab.views import plot_viewbox
+
+    store: dict[str, Any] = {}
+    settings = SimpleNamespace(
+        value=lambda key, default=None: store.get(key, default),
+        setValue=store.__setitem__,
+    )
+    monkeypatch.setattr(plot_viewbox, "QSettings", lambda: settings)
+    return store
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo[None],

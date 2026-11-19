@@ -38,7 +38,7 @@ from nlab.views.numeric_controls import (
     normalize_numeric_control,
 )
 from nlab.views.panel_status import PanelStatus
-from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE, show_frame_axes
+from nlab.views.plot_viewbox import show_frame_axes, waveform_step_mode
 from nlab.views.spec_binding import bind_spinbox
 from nlab.views.time_axis import time_axis_scale
 from nlab.workers.current_monitor_worker import (
@@ -1123,7 +1123,7 @@ class CurrentMonitorController(QWidget):
                 cursor += 1
         x_values /= 1_000_000_000
         self._last_dma_plot_points = sample_points
-        self._curve.setData(x_values, y_values, stepMode=WAVEFORM_STEP_MODE, connect="finite")
+        self._curve.setData(x_values, y_values, stepMode=waveform_step_mode(), connect="finite")
 
     def _render_values(self, now_ns: int) -> None:
         latest = self._latest

@@ -30,8 +30,9 @@ VIEW_LOG_Y = "view/log_y"
 VIEW_SCOPE_DISTRIBUTION = "view/scope_distribution"
 TIMING_CHANNEL_B_OFFSET_NS = "timing/channel_b_offset_ns"
 
-# Appearance (applies at the next start)
+# Appearance (the theme applies at the next start; waveform drawing immediately)
 APPEARANCE_THEME = "appearance/theme"
+APPEARANCE_WAVEFORM_DRAWING = "appearance/waveform_drawing"
 
 # Global workspace
 GLOBAL_DIAGNOSTICS_INTERVAL_MS = "global/diagnostics_interval_ms"

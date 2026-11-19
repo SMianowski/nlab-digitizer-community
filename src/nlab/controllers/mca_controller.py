@@ -48,7 +48,12 @@ from nlab.views.mca_roi_history_dialog import (
 )
 from nlab.views.numeric_controls import normalize_numeric_control
 from nlab.views.panel_status import PanelStatus
-from nlab.views.plot_viewbox import WAVEFORM_STEP_MODE, ModifierZoomViewBox, show_frame_axes
+from nlab.views.plot_viewbox import (
+    WAVEFORM_STEP_MODE,
+    ModifierZoomViewBox,
+    follow_waveform_drawing,
+    show_frame_axes,
+)
 from nlab.views.responsive_layout import configure_mca_layout
 from nlab.views.spec_binding import bind_double_spinbox, bind_slider, bind_spinbox
 from nlab.views.time_axis import format_duration_ns, time_axis_scale
@@ -746,13 +751,13 @@ class MCAController(QWidget):
         self._debug1_curve = self._debug_plot.plot(
             pen=pg.mkPen("#00bfff", width=1),
             name="Debug 1",
-            stepMode=WAVEFORM_STEP_MODE,
         )
         self._debug2_curve = self._debug_plot.plot(
             pen=pg.mkPen("#ff8c00", width=1),
             name="Debug 2",
-            stepMode=WAVEFORM_STEP_MODE,
         )
+        follow_waveform_drawing(self._debug1_curve)
+        follow_waveform_drawing(self._debug2_curve)
         self._debug_cc_guide = pg.PlotDataItem(
             pen=pg.mkPen(theme.colors().plot_ink, width=1.5, style=Qt.PenStyle.DashLine),
             stepMode=WAVEFORM_STEP_MODE,

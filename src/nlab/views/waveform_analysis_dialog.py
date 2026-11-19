@@ -58,8 +58,8 @@ from nlab.views.help_dialog import HelpDialog
 from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.offline_psd_plot import OfflinePsdPlot
 from nlab.views.plot_viewbox import (
-    WAVEFORM_STEP_MODE,
     ModifierZoomViewBox,
+    follow_waveform_drawing,
     show_frame_axes,
     style_plot_widget,
 )
@@ -238,16 +238,15 @@ class WaveformAnalysisDialog(QDialog):
         )
         self.raw_curve = self.waveform_plot.plot(
             pen=pg.mkPen("#1597d4", width=1.2), name="Stored waveform",
-            stepMode=WAVEFORM_STEP_MODE,
         )
         self.oriented_curve = self.waveform_plot.plot(
             pen=pg.mkPen("#f28e2b", width=1.2), name="Polarity-normalized",
-            stepMode=WAVEFORM_STEP_MODE,
         )
         self.average_curve = self.waveform_plot.plot(
             pen=pg.mkPen("#8c2d91", width=2),
-            stepMode=WAVEFORM_STEP_MODE,
         )
+        for curve in (self.raw_curve, self.oriented_curve, self.average_curve):
+            follow_waveform_drawing(curve)
         self.average_curve.hide()
         self.baseline_region = pg.LinearRegionItem(
             values=(0.0, 1.0),

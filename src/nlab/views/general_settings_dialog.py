@@ -29,6 +29,13 @@ from PySide6.QtWidgets import (
 from nlab import settings_keys
 from nlab.hardware.digitizer.mca_capture import McaDmaOutputMode
 from nlab.views import theme
+from nlab.views.plot_viewbox import (
+    WAVEFORM_DRAWING_LABELS,
+    WAVEFORM_DRAWINGS,
+    WaveformDrawing,
+    save_waveform_drawing,
+    saved_waveform_drawing,
+)
 
 AUTO_CONFIGURATION_ENABLED_KEY = settings_keys.CONFIGURATION_AUTO_SAVE_ENABLED
 AUTO_CONFIGURATION_DIRECTORY = "device-configurations"
@@ -112,6 +119,19 @@ class GeneralSettingsDialog(QDialog):
         theme_note.setEnabled(False)
         appearance_form.addRow("Theme:", self.theme_combo)
         appearance_form.addRow("", theme_note)
+        self.waveform_drawing_combo = QComboBox()
+        for drawing in WAVEFORM_DRAWINGS:
+            self.waveform_drawing_combo.addItem(WAVEFORM_DRAWING_LABELS[drawing], drawing)
+        self.waveform_drawing_combo.setCurrentIndex(
+            max(0, self.waveform_drawing_combo.findData(saved_waveform_drawing()))
+        )
+        self.waveform_drawing_combo.setToolTip(
+            "How sampled waveforms are drawn in the Scope, MCA debug, Current and "
+            "Waveform Analysis plots. Steps hold each sample until the next one; "
+            "lines join consecutive samples directly. The samples themselves are "
+            "unchanged. Applies immediately."
+        )
+        appearance_form.addRow("Waveforms:", self.waveform_drawing_combo)
 
         scope_group = QGroupBox("Scope display")
         scope_form = QFormLayout(scope_group)
@@ -247,8 +267,14 @@ class GeneralSettingsDialog(QDialog):
     def theme_mode(self) -> theme.ThemeMode:
         return theme.ThemeMode(str(self.theme_combo.currentData()))
 
+    @property
+    def waveform_drawing(self) -> WaveformDrawing:
+        value = str(self.waveform_drawing_combo.currentData())
+        return value if value in WAVEFORM_DRAWINGS else saved_waveform_drawing()
+
     def accept(self) -> None:
         theme.save_theme_mode(self.theme_mode)
+        save_waveform_drawing(self.waveform_drawing)
         super().accept()
 
     @property

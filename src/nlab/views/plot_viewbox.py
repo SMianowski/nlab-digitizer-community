@@ -1,18 +1,104 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pyqtgraph import PlotCurveItem, PlotWidget, ViewBox
-from PySide6.QtCore import Qt, Signal
+from pyqtgraph import PlotCurveItem, PlotDataItem, PlotWidget, ViewBox
+from PySide6.QtCore import QObject, QSettings, Qt, Signal, Slot
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QMenu, QWidget
 
+from nlab import settings_keys
 from nlab.views import theme
 
 # pyqtgraph's "right" path holds y[i] from x[i] to x[i+1], then
 # transitions vertically at the next timestamp. Keep x/y arrays unexpanded so
 # cursor/drag calculations still use the original samples (covered by tests).
 WAVEFORM_STEP_MODE = "right"
+
+# How sampled waveforms (Scope trace, MCA debug traces, Waveform Analysis) are
+# drawn: held steps between samples, or straight lines joining them. Both use
+# the same unexpanded x/y arrays, so switching never changes the data.
+WaveformDrawing = Literal["steps", "lines"]
+WAVEFORM_DRAWINGS: tuple[WaveformDrawing, ...] = ("steps", "lines")
+WAVEFORM_DRAWING_LABELS: dict[WaveformDrawing, str] = {
+    "steps": "Steps (hold each sample)",
+    "lines": "Lines (join samples directly)",
+}
+DEFAULT_WAVEFORM_DRAWING: WaveformDrawing = "steps"
+_STEP_MODES: dict[WaveformDrawing, str | None] = {"steps": WAVEFORM_STEP_MODE, "lines": None}
+
+
+def saved_waveform_drawing() -> WaveformDrawing:
+    """The waveform drawing chosen in General Settings, or the step default."""
+    value = str(
+        QSettings().value(settings_keys.APPEARANCE_WAVEFORM_DRAWING, DEFAULT_WAVEFORM_DRAWING)
+    )
+    return value if value in WAVEFORM_DRAWINGS else DEFAULT_WAVEFORM_DRAWING
+
+
+def waveform_step_mode(drawing: WaveformDrawing | None = None) -> str | None:
+    """pyqtgraph ``stepMode`` for a waveform drawing (the saved one by default)."""
+    return _STEP_MODES[drawing if drawing is not None else saved_waveform_drawing()]
+
+
+class _WaveformDrawingNotifier(QObject):
+    changed = Signal(str)
+
+
+_notifier: _WaveformDrawingNotifier | None = None
+
+
+def _waveform_drawing_notifier() -> _WaveformDrawingNotifier:
+    global _notifier
+    if _notifier is None:
+        _notifier = _WaveformDrawingNotifier()
+    return _notifier
+
+
+def save_waveform_drawing(drawing: WaveformDrawing) -> None:
+    """Persist a waveform drawing and redraw every followed waveform with it."""
+    if drawing not in WAVEFORM_DRAWINGS:
+        raise ValueError(f"unsupported waveform drawing {drawing!r}")
+    changed = drawing != saved_waveform_drawing()
+    QSettings().setValue(settings_keys.APPEARANCE_WAVEFORM_DRAWING, drawing)
+    if changed:
+        _waveform_drawing_notifier().changed.emit(drawing)
+
+
+def apply_waveform_drawing(
+    item: PlotDataItem | PlotCurveItem,
+    drawing: WaveformDrawing | None = None,
+) -> None:
+    """Redraw one waveform curve as steps or lines, keeping its data."""
+    mode = waveform_step_mode(drawing)
+    if item.opts.get("stepMode") == mode:
+        return
+    x, y = item.xData, item.yData
+    # pyqtgraph replaces the data when stepMode is set alone: resend it.
+    if x is None or y is None or len(y) == 0:
+        item.setData(stepMode=mode)
+    else:
+        item.setData(x, y, stepMode=mode)
+
+
+class _WaveformDrawingFollower(QObject):
+    """Child of a curve, so Qt drops the connection when the curve is deleted."""
+
+    def __init__(self, item: PlotDataItem | PlotCurveItem) -> None:
+        super().__init__(item)
+        self._item = item
+
+    @Slot(str)
+    def apply(self, drawing: str) -> None:
+        if drawing in WAVEFORM_DRAWINGS:
+            apply_waveform_drawing(self._item, drawing)
+
+
+def follow_waveform_drawing(item: PlotDataItem | PlotCurveItem) -> None:
+    """Draw a waveform curve with the saved style now and after every change."""
+    apply_waveform_drawing(item)
+    follower = _WaveformDrawingFollower(item)
+    _waveform_drawing_notifier().changed.connect(follower.apply)
 
 
 # Fixed size of a frame-only axis: room for the neighbouring axis's end tick
@@ -98,8 +184,9 @@ class DraggableScopeCurve(PlotCurveItem):  # type: ignore[misc]
     drag_finished = Signal(bool)  # True when cancelled.
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("stepMode", WAVEFORM_STEP_MODE)
+        kwargs.setdefault("stepMode", waveform_step_mode())
         super().__init__(*args, **kwargs)
+        follow_waveform_drawing(self)
         self.setClickable(True, width=14)
         self._drag_enabled = True
         self._drag_origin = None

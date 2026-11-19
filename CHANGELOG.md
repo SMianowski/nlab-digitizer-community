@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every board connection like Connection → Reconnect Device, without a second
   confirmation, and offers another attempt if it fails. Further reports of the
   same loss do not reopen the message.
+- **Waveform drawing: steps or lines** — General Settings → Appearance → Waveforms
+  draws the Scope trace, MCA debug traces, Current raw pulses and Waveform Analysis
+  waveforms either as held steps (the default, as before) or as straight lines
+  joining the samples. The choice applies immediately and does not change the
+  samples. pyqtgraph has no smoothed-curve drawing, so none is offered.
 
 ### Removed
 
