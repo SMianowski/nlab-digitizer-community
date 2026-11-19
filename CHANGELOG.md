@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-11-19
+
+Connection-loss handling and a waveform drawing choice: a lost board connection
+stops PSU and Scope polling and offers a one-click reconnect, and waveforms can
+be drawn as steps or lines. The remote board reboot and shutdown commands are
+removed.
+
 ### Added
 
 - **Reconnect prompt after a lost board connection** — when the Scope live view,
