@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-11-20
+
+Measurement series: one Start repeats a timed Scope, MCA or Current measurement
+and numbers every recording. MCA series runs also save their spectra as CSV
+files, and the Current view gains a time limit.
+
 ### Added
 
 - **Measurement series** — **Settings → Enable Series** enables a **Repeats** control in
