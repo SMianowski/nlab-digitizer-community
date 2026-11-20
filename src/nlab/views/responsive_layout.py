@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtGui import QScreen, QWindow
 from PySide6.QtWidgets import (
     QBoxLayout,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLayout,
     QScrollArea,
     QSizePolicy,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -25,9 +26,33 @@ from nlab.ui.ui_psd_view import Ui_PSDView
 from nlab.ui.ui_psu_view import Ui_PSUView
 from nlab.ui.ui_scope_view import Ui_ScopeView
 
+QWIDGETSIZE_MAX = 16_777_215  # Qt's "no maximum" widget size
 
-def _scroll_area(name: str, content: QWidget) -> QScrollArea:
-    scroll = QScrollArea()
+
+class _ScrollColumn(QScrollArea):
+    """A vertical scroll column that prefers its content's natural width.
+
+    QScrollArea's own size hint ignores the content's preferred width, so a
+    splitter would open the wrapped column at its minimum and clip its labels.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scroll_bar_extent = 0
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        hint = super().sizeHint()
+        content = self.widget()
+        if content is not None:
+            width = content.sizeHint().width() + self.scroll_bar_extent
+            hint.setWidth(max(self.minimumWidth(), min(self.maximumWidth(), width)))
+        return hint
+
+
+def _scroll_area(
+    name: str, content: QWidget, scroll: QScrollArea | None = None,
+) -> QScrollArea:
+    scroll = QScrollArea() if scroll is None else scroll
     scroll.setObjectName(name)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -55,6 +80,35 @@ def _wrap_layout(
     content.setLayout(content_layout)
     scroll = _scroll_area(name, content)
     parent_layout.insertWidget(index, scroll, stretch)
+    return scroll
+
+
+def _fit_scroll_width(scroll: QScrollArea, content: QWidget) -> None:
+    """Size a vertical scroll column to its content's width plus the scroll bar.
+
+    Without the allowance, a column whose content has a fixed width would also
+    need a horizontal scroll bar whenever its vertical one appears.
+    """
+    bar = scroll.verticalScrollBar()
+    extent = max(
+        bar.sizeHint().width(),
+        scroll.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent, None, bar),
+    )
+    scroll.setMinimumWidth(content.minimumWidth() + extent)
+    if content.maximumWidth() < QWIDGETSIZE_MAX:
+        scroll.setMaximumWidth(content.maximumWidth() + extent)
+    else:
+        scroll.setMaximumWidth(QWIDGETSIZE_MAX)
+    if isinstance(scroll, _ScrollColumn):
+        scroll.scroll_bar_extent = extent
+
+
+def scroll_column(name: str, content: QWidget) -> QScrollArea:
+    """A scrollable column for *content*, whose height then never sets the
+    window's minimum height; the column keeps the content's width limits and
+    preferred width."""
+    scroll = _scroll_area(name, content, _ScrollColumn())
+    _fit_scroll_width(scroll, content)
     return scroll
 
 
@@ -144,9 +198,25 @@ def _set_box_columns(
 
 
 class MCAResponsiveLayout(QObject):
-    """Switch the MCA view when its top-level window moves between screens."""
+    """Choose the wide or compact MCA layout for the screen showing the view.
 
-    _COMPACT_HEIGHT = 1080
+    The choice uses the screen's available area in device-independent pixels,
+    the units every widget size is in. Display scaling shrinks that area while
+    the physical resolution stays the same: 1920x1080 at the common 125%
+    Windows default offers 1536x816 above the taskbar, too small for the wide
+    layout that a physical 1080-line test selected.
+
+    The control column scrolls in both layouts, so its length never becomes
+    the window's minimum height. When it did, the window could not fit a
+    1080p work area, and a maximized window squeezed the channel docks below
+    their content, drawing the dock tab bar over the controls.
+    """
+
+    # Available device-independent area the wide layout needs: its header row
+    # (MCA and Measurement groups) is about 1,390 px wide with the window frame,
+    # and below about 900 px the plots beside it become too short to be useful.
+    _COMPACT_HEIGHT = 900
+    _COMPACT_WIDTH = 1440
 
     def __init__(self, view: QWidget, ui: Ui_MCAView, watch_screen: bool) -> None:
         super().__init__(view)
@@ -154,7 +224,6 @@ class MCAResponsiveLayout(QObject):
         self._ui = ui
         self._watch_screen = watch_screen
         self._window: QWindow | None = None
-        self._scroll: QScrollArea | None = None
         self._compact = False
         self._mca_entries: tuple[QLayout | QWidget, ...] = (
             ui.vPolarity,
@@ -201,6 +270,8 @@ class MCAResponsiveLayout(QObject):
                 ui.btnDmaFile,
             )
         }
+        self._scroll = _wrap_widget(ui.bodyRow, ui.controlPanel, "mcaControlScroll")
+        _fit_scroll_width(self._scroll, ui.controlPanel)
         if watch_screen:
             view.installEventFilter(self)
 
@@ -225,11 +296,14 @@ class MCAResponsiveLayout(QObject):
         self._apply_screen(window.screen())
 
     def _apply_screen(self, screen: QScreen) -> None:
-        physical_height = round(screen.geometry().height() * screen.devicePixelRatio())
-        self.apply_screen_height(physical_height)
+        available = screen.availableGeometry()
+        self.apply_screen_height(available.height(), available.width())
 
-    def apply_screen_height(self, height: int) -> None:
-        compact = height < self._COMPACT_HEIGHT
+    def apply_screen_height(self, height: int, width: int | None = None) -> None:
+        """Lay out for an available screen area in device-independent pixels."""
+        compact = height < self._COMPACT_HEIGHT or (
+            width is not None and width < self._COMPACT_WIDTH
+        )
         if compact == self._compact:
             return
         if compact:
@@ -263,7 +337,6 @@ class MCAResponsiveLayout(QObject):
         ):
             widget.setMaximumWidth(width)
         _compact_forms(self._forms)
-        self._scroll = _wrap_widget(ui.bodyRow, ui.controlPanel, "mcaControlScroll")
         self._scroll.setMinimumWidth(280)
         self._scroll.setMaximumWidth(480)
         ui.controlPanel.setMinimumWidth(260)
@@ -273,18 +346,6 @@ class MCAResponsiveLayout(QObject):
 
     def _apply_regular(self) -> None:
         ui = self._ui
-        if self._scroll is not None:
-            index = ui.bodyRow.indexOf(self._scroll)
-            stretch = ui.bodyRow.stretch(index)
-            ui.bodyRow.removeWidget(self._scroll)
-            content = self._scroll.takeWidget()
-            if content is not ui.controlPanel:
-                raise RuntimeError("MCA control scroll lost its control panel")
-            ui.bodyRow.insertWidget(index, ui.controlPanel, stretch)
-            self._scroll.setParent(None)
-            self._scroll.deleteLater()
-            self._scroll = None
-
         ui.controlLayout.removeWidget(ui.groupMca)
         ui.controlLayout.removeWidget(ui.groupMeasurement)
         _set_box_columns(ui.layoutMca, self._mca_entries, columns=None)
@@ -305,6 +366,7 @@ class MCAResponsiveLayout(QObject):
             form.setFieldGrowthPolicy(field_growth)
         ui.controlPanel.setMinimumSize(self._control_minimum)
         ui.controlPanel.setMaximumSize(self._control_maximum)
+        _fit_scroll_width(self._scroll, ui.controlPanel)
         ui.plotDebug.setMinimumSize(self._debug_minimum)
         ui.plotHistogram.setMinimumSize(self._histogram_minimum)
 
@@ -325,14 +387,15 @@ def configure_mca_layout(
     screen_height: int | None = None,
 ) -> MCAResponsiveLayout:
     responsive = MCAResponsiveLayout(view, ui, watch_screen=screen_height is None)
-    if screen_height is None:
-        screen = view.screen()
-        screen_height = (
-            round(screen.geometry().height() * screen.devicePixelRatio())
-            if screen is not None
-            else 720
-        )
-    responsive.apply_screen_height(screen_height)
+    if screen_height is not None:
+        responsive.apply_screen_height(screen_height)
+        return responsive
+    screen = view.screen()
+    if screen is None:
+        responsive.apply_screen_height(720)
+    else:
+        available = screen.availableGeometry()
+        responsive.apply_screen_height(available.height(), available.width())
     return responsive
 
 

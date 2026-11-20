@@ -63,6 +63,7 @@ from nlab.views.energy_axis import CalibratedEnergyAxis
 from nlab.views.image_display import transparent_sparse_bins
 from nlab.views.panel_status import PanelStatus
 from nlab.views.plot_viewbox import ModifierZoomViewBox, show_frame_axes
+from nlab.views.responsive_layout import scroll_column
 from nlab.workers.coincidence_worker import CoincidenceAnalysisThread
 
 log = logging.getLogger(__name__)
@@ -160,7 +161,9 @@ class CoincidenceController(QWidget):
         controls.setMinimumWidth(285)
         controls.setMaximumWidth(380)
         left = QVBoxLayout(controls)
-        splitter.addWidget(controls)
+        # Scroll the settings column: its seven groups are taller than the
+        # 125%-scaled 1080p work area and would otherwise set the window height.
+        splitter.addWidget(scroll_column("coincidenceControlScroll", controls))
 
         run_box = QGroupBox("Synchronized acquisition")
         run_layout = QVBoxLayout(run_box)

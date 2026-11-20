@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Measurement series: one Start repeats a timed Scope, MCA or Current measurement
 and numbers every recording. MCA series runs also save their spectra as CSV
-files, and the Current view gains a time limit.
+files, and the Current view gains a time limit. The main window now fits 1080p
+screens, including Windows' 125% display scaling.
 
 ### Added
 
@@ -38,6 +39,20 @@ files, and the Current view gains a time limit.
 - **Current time limit** — the Current view has a **Time [s]** field that stops IIR,
   Scope DMA and periodic-sum acquisitions after that many seconds (host clock; for
   Scope DMA, counted from the start of streaming). 0 runs until **Stop**, as before.
+
+### Fixed
+
+- **Window larger than the screen with Windows display scaling** — on a 1920×1080
+  screen at 125% scaling (the default on many laptops), the main window extended past
+  the right and bottom edges of the screen. The MCA view chose its wide layout from the
+  physical 1080 lines, although only 1536×816 scaled pixels are available. It now
+  chooses from the screen's available area in scaled pixels, and uses the compact
+  layout there.
+- **Channel tabs drawn over MCA controls at 1920×1080** — the MCA control column made
+  the window taller than a 1080p work area, so a maximized window squeezed the channel
+  docks and their tab bar covered the bottom buttons. The MCA control column and the
+  Coincidence settings column now scroll, so neither sets the window height, and the
+  two-channel window fits a maximized 1080p screen at 100% and 125%.
 
 ## [0.9.2] — 2026-11-19
 

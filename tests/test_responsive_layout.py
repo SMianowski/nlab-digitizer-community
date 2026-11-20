@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import partial
+from pathlib import Path
 from typing import cast
 
 import pytest
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, QSettings
 from PySide6.QtGui import QScreen
 from PySide6.QtWidgets import QBoxLayout, QScrollArea, QWidget
 from pytestqt.qtbot import QtBot
@@ -20,6 +21,7 @@ from nlab.ui.ui_psd_view import Ui_PSDView
 from nlab.ui.ui_psu_view import Ui_PSUView
 from nlab.ui.ui_scope_view import Ui_ScopeView
 from nlab.views.responsive_layout import (
+    MCAResponsiveLayout,
     configure_external_layout,
     configure_global_layout,
     configure_mca_layout,
@@ -282,12 +284,110 @@ def test_mca_restores_original_layout_after_returning_to_1080p(qtbot: QtBot) -> 
     assert ui.mainLayout.itemAt(0).layout() is ui.topRow
     assert ui.topRow.indexOf(ui.groupMca) == 0
     assert ui.topRow.indexOf(ui.groupMeasurement) == 1
-    assert view.findChild(QScrollArea, "mcaControlScroll") is None
+    # The wide layout scrolls its control column too, at the column's fixed width.
+    scroll = view.findChild(QScrollArea, "mcaControlScroll")
+    assert scroll is not None
+    assert scroll.widget() is ui.controlPanel
+    assert scroll.minimumWidth() == scroll.maximumWidth() > ui.controlPanel.maximumWidth()
 
     responsive.apply_screen_height(720)
     assert ui.controlLayout.indexOf(ui.groupMca) == 0
     assert ui.controlLayout.indexOf(ui.groupMeasurement) == 1
-    assert view.findChild(QScrollArea, "mcaControlScroll") is not None
+    assert view.findChild(QScrollArea, "mcaControlScroll") is scroll
+    assert scroll.widget() is ui.controlPanel
+
+
+@pytest.mark.parametrize(
+    ("available", "compact"),
+    (
+        ((1536, 816), True),  # 1920x1080 at 125%: 1080 physical lines, 816 px usable
+        ((1920, 1032), False),  # 1920x1080 at 100%
+        ((1280, 984), True),  # 1280x1024: too narrow for the header row
+        ((1280, 672), True),  # 1280x720
+        ((2048, 1104), False),  # 2560x1440 at 125%
+    ),
+)
+def test_mca_layout_follows_the_device_independent_screen_area(
+    qtbot: QtBot, available: tuple[int, int], compact: bool,
+) -> None:
+    view = QWidget()
+    qtbot.addWidget(view)
+    ui = Ui_MCAView()
+    ui.setupUi(view)
+    responsive = configure_mca_layout(view, ui, screen_height=720 if not compact else 1080)
+
+    responsive._apply_screen(cast(QScreen, _Screen(*available)))
+
+    in_header_row = ui.mainLayout.itemAt(0).layout() is ui.topRow
+    assert in_header_row is not compact
+    assert ui.controlLayout.indexOf(ui.groupMca) == (0 if compact else -1)
+
+
+def test_mca_wide_layout_height_does_not_grow_with_the_control_column(qtbot: QtBot) -> None:
+    view = QWidget()
+    qtbot.addWidget(view)
+    ui = Ui_MCAView()
+    ui.setupUi(view)
+    configure_mca_layout(view, ui, screen_height=1080)
+
+    # The column alone is taller than a 1080p work area once window chrome is added.
+    assert ui.controlPanel.minimumSizeHint().height() > view.minimumSizeHint().height()
+    assert view.minimumSizeHint().height() <= 560
+
+
+@pytest.fixture
+def isolated_qsettings(tmp_path: Path) -> Iterator[None]:
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "ini"))
+    yield
+    QSettings.setDefaultFormat(QSettings.Format.NativeFormat)
+
+
+@pytest.mark.parametrize(
+    ("available", "maximized_client", "check_width"),
+    (
+        # 1920x1080 at 125% (the Windows default on many laptops): compact MCA.
+        ((1536, 816), (1536, 786), True),
+        # 1920x1080 at 100%: wide MCA. The offscreen test platform draws text as
+        # boxes much wider than real glyphs (its header row is ~1950 px here, about
+        # 1390 px with Windows fonts), so only the height is meaningful.
+        ((1920, 1032), (1920, 1001), False),
+    ),
+)
+def test_two_channel_window_fits_a_maximized_full_hd_screen(
+    qtbot: QtBot,
+    isolated_qsettings: None,
+    monkeypatch: pytest.MonkeyPatch,
+    available: tuple[int, int],
+    maximized_client: tuple[int, int],
+    check_width: bool,
+) -> None:
+    """The largest tab sets the window minimum; it must fit the work area.
+
+    A larger minimum pushed the window past the screen edges, and a maximized
+    window then squeezed the channel docks so their tab bar covered controls.
+    """
+    monkeypatch.setattr(
+        MCAResponsiveLayout,
+        "_apply_screen",
+        lambda self, _screen: self.apply_screen_height(available[1], available[0]),
+    )
+    window = MainAppWindow(channels=2, offline=True)
+    qtbot.addWidget(window)
+    window.resize(*maximized_client)
+    window.show()
+    tabs = window.ui.mainTabs
+    for index in range(tabs.count()):  # hidden pages update their minimum when shown
+        tabs.setCurrentIndex(index)
+        qtbot.wait(10)
+
+    minimum = window.minimumSizeHint()
+    assert minimum.height() <= maximized_client[1]
+    assert window.height() == maximized_client[1]
+    if check_width:
+        assert minimum.width() <= maximized_client[0]
+        assert window.width() == maximized_client[0]
+    assert window.findChild(QScrollArea, "coincidenceControlScroll") is not None
 
 
 def test_mca_dma_checkbox_stays_above_file_button_across_layout_changes(qtbot: QtBot) -> None:
