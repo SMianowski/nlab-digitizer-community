@@ -154,6 +154,24 @@
          </layout>
         </item>
         <item>
+         <layout class="QVBoxLayout" name="vSeries">
+          <item>
+           <widget class="QLabel" name="labelSeriesRuns">
+            <property name="text"><string>Repeats</string></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QSpinBox" name="spinSeriesRuns">
+            <property name="enabled"><bool>false</bool></property>
+            <property name="toolTip"><string>Number of runs one Start performs; check Settings &gt; Enable Series to use it.</string></property>
+            <property name="minimum"><number>1</number></property>
+            <property name="maximum"><number>9999</number></property>
+            <property name="value"><number>1</number></property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
          <layout class="QVBoxLayout" name="vStartStop">
           <item>
            <widget class="QPushButton" name="btnStart">

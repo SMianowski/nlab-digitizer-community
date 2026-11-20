@@ -28,6 +28,7 @@ VIEW_SHOW_ROI = "view/show_roi"
 VIEW_DIFFERENTIAL_HISTOGRAM = "view/differential_histogram"
 VIEW_LOG_Y = "view/log_y"
 VIEW_SCOPE_DISTRIBUTION = "view/scope_distribution"
+MEASUREMENT_SERIES_ENABLED = "measurement/series_enabled"
 TIMING_CHANNEL_B_OFFSET_NS = "timing/channel_b_offset_ns"
 
 # Appearance (the theme applies at the next start; waveform drawing immediately)

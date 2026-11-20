@@ -66,6 +66,7 @@ _KEY_SHOW_ROI = settings_keys.VIEW_SHOW_ROI
 _KEY_DIFFERENTIAL_HISTOGRAM = settings_keys.VIEW_DIFFERENTIAL_HISTOGRAM
 _KEY_LOG_Y = settings_keys.VIEW_LOG_Y
 _KEY_SCOPE_DISTRIBUTION = settings_keys.VIEW_SCOPE_DISTRIBUTION
+_KEY_MEASUREMENT_SERIES = settings_keys.MEASUREMENT_SERIES_ENABLED
 _KEY_TIMING_OFFSET_NS = settings_keys.TIMING_CHANNEL_B_OFFSET_NS
 _KEY_SESSION_FOLDER = settings_keys.SESSION_LAST_FOLDER
 _GENERAL_CONTROLLER_KEYS = {
@@ -263,6 +264,7 @@ class MainAppWindow(QMainWindow):
         self.ui.actionSaveSettings.triggered.connect(self._on_save_settings)
         self.ui.actionLoadSettings.triggered.connect(self._on_load_settings)
         self.ui.actionGeneralSettings.triggered.connect(self._on_general_settings)
+        self.ui.actionEnableSeries.toggled.connect(self._on_measurement_series_toggled)
         self.ui.actionAbout.triggered.connect(self._on_about)
         self.ui.actionThirdPartyLicenses.triggered.connect(self._on_third_party_licenses)
         self.ui.actionShowSystemLog.toggled.connect(self._on_show_system_log_toggled)
@@ -506,6 +508,9 @@ class MainAppWindow(QMainWindow):
         scope_distribution = cast(
             bool, settings.value(_KEY_SCOPE_DISTRIBUTION, False, type=bool)
         )
+        measurement_series = cast(
+            bool, settings.value(_KEY_MEASUREMENT_SERIES, False, type=bool)
+        )
 
         # Suppress intermediate toggled signals while restoring state.
         self.ui.actionShowSystemLog.blockSignals(True)
@@ -514,6 +519,7 @@ class MainAppWindow(QMainWindow):
         self.ui.actionDifferentialHistogram.blockSignals(True)
         self.ui.actionLogY.blockSignals(True)
         self.ui.actionScopeDistribution.blockSignals(True)
+        self.ui.actionEnableSeries.blockSignals(True)
 
         self.ui.actionShowSystemLog.setChecked(show_log)
         self.ui.actionDebugMode.setChecked(debug_mode)
@@ -521,6 +527,7 @@ class MainAppWindow(QMainWindow):
         self.ui.actionDifferentialHistogram.setChecked(differential_histogram)
         self.ui.actionLogY.setChecked(log_y)
         self.ui.actionScopeDistribution.setChecked(scope_distribution)
+        self.ui.actionEnableSeries.setChecked(measurement_series)
         self._set_log_tab_visible(show_log)
         if debug_mode:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -531,6 +538,7 @@ class MainAppWindow(QMainWindow):
         self.ui.actionDifferentialHistogram.blockSignals(False)
         self.ui.actionLogY.blockSignals(False)
         self.ui.actionScopeDistribution.blockSignals(False)
+        self.ui.actionEnableSeries.blockSignals(False)
 
     def _save_developer_settings(self) -> None:
         settings = QSettings()
@@ -543,6 +551,7 @@ class MainAppWindow(QMainWindow):
         )
         settings.setValue(_KEY_LOG_Y, self.ui.actionLogY.isChecked())
         settings.setValue(_KEY_SCOPE_DISTRIBUTION, self.ui.actionScopeDistribution.isChecked())
+        settings.setValue(_KEY_MEASUREMENT_SERIES, self.ui.actionEnableSeries.isChecked())
 
     def configuration_settings(self) -> dict[str, object]:
         """Return top-level controls that are owned only by the application."""
@@ -553,6 +562,7 @@ class MainAppWindow(QMainWindow):
             "differential_histogram": self.ui.actionDifferentialHistogram.isChecked(),
             "log_y": self.ui.actionLogY.isChecked(),
             "scope_distribution": self.ui.actionScopeDistribution.isChecked(),
+            "measurement_series": self.ui.actionEnableSeries.isChecked(),
             "dma_save_folder": str(QSettings().value(_KEY_DMA_FOLDER, "measurements")),
             "mca_dma_output_mode": str(
                 QSettings().value(
@@ -577,6 +587,7 @@ class MainAppWindow(QMainWindow):
             "differential_histogram": self.ui.actionDifferentialHistogram,
             "log_y": self.ui.actionLogY,
             "scope_distribution": self.ui.actionScopeDistribution,
+            "measurement_series": self.ui.actionEnableSeries,
         }
         for name, action in actions.items():
             if name in settings:
@@ -634,6 +645,9 @@ class MainAppWindow(QMainWindow):
         self._controller.set_log_y(self.ui.actionLogY.isChecked())
         self._controller.set_scope_distribution_enabled(
             self.ui.actionScopeDistribution.isChecked()
+        )
+        self._controller.set_measurement_series_enabled(
+            self.ui.actionEnableSeries.isChecked()
         )
 
     def _general_settings_values(self) -> dict[str, object]:
@@ -1102,6 +1116,10 @@ class MainAppWindow(QMainWindow):
 
     def _on_log_y_toggled(self, checked: bool) -> None:
         self._controller.set_log_y(checked)
+
+    def _on_measurement_series_toggled(self, checked: bool) -> None:
+        self._controller.set_measurement_series_enabled(checked)
+        QSettings().setValue(_KEY_MEASUREMENT_SERIES, checked)
 
     def _on_reset_zoom(self) -> None:
         self._controller.reset_all_zoom()

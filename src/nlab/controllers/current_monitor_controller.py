@@ -15,6 +15,11 @@ from PySide6.QtCore import QLocale, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
+from nlab.controllers.measurement_series import (
+    MeasurementSeries,
+    owner_series,
+    time_limit_required_message,
+)
 from nlab.hardware.digitizer.current_monitor import (
     ScopeCurrentAccumulator,
     ScopeCurrentSnapshot,
@@ -28,7 +33,11 @@ from nlab.hardware.digitizer.scope import (
     range_spec,
 )
 from nlab.ui.ui_current_monitor_view import Ui_CurrentMonitorView
-from nlab.utils.recording_paths import measurement_folder, unique_recording_path
+from nlab.utils.recording_paths import (
+    available_path,
+    measurement_folder,
+    unique_recording_path,
+)
 from nlab.utils.sample_history import SampleHistory
 from nlab.views import theme
 from nlab.views.current_capture_dialog import CurrentCaptureDialog
@@ -141,6 +150,18 @@ class CurrentMonitorController(QWidget):
         if self._sum_supported():
             self.ui.comboMode.addItem("Periodic sums")
         self.status = PanelStatus(self, "Monitor stopped.")
+        # Host-clock duration of one run, for every acquisition mode.
+        self._measurement_timer = QTimer(self)
+        self._measurement_timer.setSingleShot(True)
+        self._measurement_timer.timeout.connect(self._on_measurement_timeout)
+        self._series = MeasurementSeries(
+            self,
+            spinbox=self.ui.spinSeriesRuns,
+            label=self.ui.labelSeriesRuns,
+            name=f"Current ch{channel}",
+            is_idle=self._series_idle,
+            start_run=self._start_series_run,
+        )
         bind_numeric_control(self.ui.spinDmaGap, snap_to_step=True)
         self.ui.spinDmaGap.setLocale(QLocale.c())
         bind_spinbox(self.ui.spinSumSamples, range_spec(PARAMETER_SPECS, ScopeParam.FRAME_SAMPLES))
@@ -224,7 +245,7 @@ class CurrentMonitorController(QWidget):
             self._plot.getAxis(side).setScale(1_000_000_000 / scale.ns_per_unit)
 
     def _connect_signals(self) -> None:
-        self.ui.btnStart.clicked.connect(self.start_monitor)
+        self.ui.btnStart.clicked.connect(self._on_start_clicked)
         self.ui.btnStop.clicked.connect(self.request_monitor_stop)
         self.ui.btnResetScopeDefaults.clicked.connect(self._reset_scope_defaults)
         self.ui.btnZero.clicked.connect(self._set_zero_from_recent)
@@ -303,6 +324,7 @@ class CurrentMonitorController(QWidget):
                 self.ui.comboMode,
                 self.ui.spinDmaGap,
                 self.ui.btnResetScopeDefaults,
+                self.ui.spinTime,
             ):
                 widget.setEnabled(False)
             self.ui.labelDmaGap.setEnabled(False)
@@ -311,6 +333,7 @@ class CurrentMonitorController(QWidget):
         self.ui.btnStart.setEnabled(not running and (not sum_mode or self._sum_supported()))
         self.ui.btnStop.setEnabled(running)
         self.ui.comboMode.setEnabled(not running)
+        self.ui.spinTime.setEnabled(not running)
         dma_gap_enabled = (
             not running
             and (
@@ -437,6 +460,58 @@ class CurrentMonitorController(QWidget):
     def _normalize_dma_gap(self) -> None:
         self._set_dma_gap_cycles(self._dma_gap_cycles())
 
+    # ------------------------------------------------------------------
+    # Time limit and measurement series
+    # ------------------------------------------------------------------
+
+    def set_measurement_series_enabled(self, enabled: bool) -> None:
+        """Apply Settings > Enable Series to this view."""
+        self._series.set_enabled(enabled)
+
+    @Slot()
+    def _on_start_clicked(self) -> None:
+        """Operator Start: begins a series when Settings > Enable Series is on."""
+        series = self._series
+        if not series.begin(self.ui.spinTime.value()):
+            self.status.setText(time_limit_required_message(series.runs()))
+            return
+        try:
+            self.start_monitor()
+        finally:
+            if series.active and self._series_idle():
+                series.cancel()  # Start was declined and already reported why.
+
+    def _series_idle(self) -> bool:
+        """No acquisition, and the IIR worker thread (if any) has exited.
+
+        Scope DMA and periodic sums report their end only after the Scope
+        controller has released the buffer and reader.
+        """
+        return not self._is_running() and self._worker_thread is None
+
+    def _start_series_run(self) -> None:
+        if self.ui.btnStart.isEnabled():
+            self.start_monitor()
+
+    def _start_measurement_timer(self) -> None:
+        time_s = self.ui.spinTime.value()
+        if time_s > 0:
+            self._measurement_timer.start(time_s * 1000)
+            log.info("Current ch%d: measurement timer set to %d s", self._channel, time_s)
+
+    @Slot()
+    def _on_measurement_timeout(self) -> None:
+        log.info("Current ch%d: measurement time limit reached", self._channel)
+        if (series := owner_series(self)) is not None:
+            series.mark_completed()
+        self.request_monitor_stop()
+
+    def _end_series_run(self, error: str | None) -> None:
+        """The acquisition released its resources; continue or end the series."""
+        self._measurement_timer.stop()
+        if (series := owner_series(self)) is not None:
+            series.run_ended(error)
+
     def _schedule_display(self) -> None:
         if not self._display_timer.isActive():
             delay_ns = max(0, self._next_display_ns - time.perf_counter_ns())
@@ -475,6 +550,7 @@ class CurrentMonitorController(QWidget):
         self._next_display_ns = time.perf_counter_ns() + self._display_period_ns
         self._schedule_display()
         thread.start()
+        self._start_measurement_timer()
 
     def set_replay_hardware_interlock(
         self, enabled: bool, *, resume_background: bool = True,
@@ -484,6 +560,8 @@ class CurrentMonitorController(QWidget):
         if enabled == self._replay_hardware_interlocked:
             return
         self._replay_hardware_interlocked = enabled
+        if enabled and (series := owner_series(self)) is not None:
+            series.cancel()
         if enabled and self._is_running():
             self.stop_monitor_sync()
         self._set_running_controls(self._is_running())
@@ -559,9 +637,19 @@ class CurrentMonitorController(QWidget):
         if scope_controller is None or not self._sum_supported():
             self.status.setText("Periodic sums are unavailable on this backend/firmware.")
             return
-        output = self._sum_output_path() if self.ui.cbRecordSums.isChecked() else None
+        series = owner_series(self)
+        numbered = (
+            series.recording_path(self._sum_output_path)
+            if series is not None and self.ui.cbRecordSums.isChecked()
+            else None
+        )
+        if numbered is not None:
+            # Series recordings are numbered and never replace a file.
+            output: Path | None = available_path(numbered)
+        else:
+            output = self._sum_output_path() if self.ui.cbRecordSums.isChecked() else None
         overwrite = False
-        if output is not None and output.is_file():
+        if numbered is None and output is not None and output.is_file():
             answer = QMessageBox.question(
                 self,
                 "Overwrite sum recording?",
@@ -599,6 +687,7 @@ class CurrentMonitorController(QWidget):
         )
         self._next_display_ns = time.perf_counter_ns() + self._display_period_ns
         self._schedule_display()
+        self._start_measurement_timer()
 
     def _sum_output_path(self) -> Path:
         """Resolve explicit names or generate a fresh name in the measurement folder.
@@ -669,6 +758,7 @@ class CurrentMonitorController(QWidget):
         self._stop_requested = False
         self._set_running_controls(False)
         self.status.setText(worker.message)
+        self._end_series_run(worker.error or None)
 
     def _render_sum_snapshot(self) -> None:
         worker = self._sum_worker
@@ -764,6 +854,9 @@ class CurrentMonitorController(QWidget):
     def request_monitor_stop(self) -> None:
         if self._stop_requested:
             return
+        self._measurement_timer.stop()
+        if (series := owner_series(self)) is not None:
+            series.stop_requested()
         self._stop_requested = True
         if self._acquisition is CurrentAcquisition.SUMS:
             if self._sum_worker is not None:
@@ -783,6 +876,9 @@ class CurrentMonitorController(QWidget):
 
     def stop_monitor_sync(self) -> None:
         """Stop the selected transport and wait for resource release."""
+        if (series := owner_series(self)) is not None:
+            series.cancel()
+        self._measurement_timer.stop()
         if self._acquisition is CurrentAcquisition.SUMS:
             worker = self._sum_worker
             if worker is not None:
@@ -827,6 +923,7 @@ class CurrentMonitorController(QWidget):
         self._set_running_controls(False)
         if self._monitor_error is None:
             self.status.setText("Monitor stopped.")
+        self._end_series_run(self._monitor_error)
 
     @Slot(bool, str)
     def _on_scope_dma_state_changed(self, running: bool, message: str) -> None:
@@ -834,6 +931,8 @@ class CurrentMonitorController(QWidget):
             return
         if running:
             self.status.setText(message)
+            # Time the run from DMA streaming, not from arming.
+            self._start_measurement_timer()
             return
         self._finish_dma_monitor(message)
 
@@ -844,6 +943,11 @@ class CurrentMonitorController(QWidget):
         self._stop_requested = False
         self._set_running_controls(False)
         self.status.setText(message)
+        scope_controller = self._scope_controller
+        self._end_series_run(
+            self._monitor_error
+            or (scope_controller.last_dma_error if scope_controller is not None else None)
+        )
 
     @staticmethod
     def _convert(raw_code: float, zero: float, scale: float) -> float:
@@ -1202,6 +1306,8 @@ class CurrentMonitorController(QWidget):
             "sum_frame_samples": self._sum_frame_samples(),
             "sum_file_format": self._sum_format(),
             "pause_readbacks": self.ui.cbPauseReadbacks.isChecked(),
+            "measurement_time_s": self.ui.spinTime.value(),
+            "series_runs": self._series.runs(),
             "analysis_bin_ms": (
                 self._scope_current_accumulator.bin_width_ms
                 if self._scope_current_accumulator is not None
@@ -1234,6 +1340,10 @@ class CurrentMonitorController(QWidget):
                     self.start_monitor()
         if "pause_readbacks" in settings:
             self.ui.cbPauseReadbacks.setChecked(bool(settings["pause_readbacks"]))
+        if "measurement_time_s" in settings:
+            self.ui.spinTime.setValue(int(settings["measurement_time_s"]))
+        if "series_runs" in settings:
+            self._series.set_runs(int(settings["series_runs"]))
         if settings.get("sum_file_format") in _SUM_FORMATS:
             if self._is_running():
                 raise RuntimeError("cannot change the sum file format while monitor is running")

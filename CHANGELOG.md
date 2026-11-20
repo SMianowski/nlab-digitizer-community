@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Measurement series** — **Settings → Enable Series** enables a **Repeats** control in
+  the Scope, MCA and Current views. One **Start** then performs that many timed runs:
+  each run stops on its **Time [s]** limit, and the next run starts only after the
+  previous one has stopped and released the board, including the complete drain and
+  close of a DMA recording, so every run repeats the full arm sequence. More than one
+  run needs a time limit above 0. **Stop**, an error, a lost connection, session
+  replay or a coincidence session ends the series; a failed run is never retried.
+  While the option is checked, recordings (Scope DMA, MCA list mode and Current sum
+  files) keep one name followed by `_001`, `_002`, …: the chosen file or the generated
+  default. With **Record list-mode DMA** checked, every MCA run writes its own
+  complete list-mode file (and settings snapshot), closed before the next run arms.
+  Existing files are never replaced. The option and each view's run count are saved
+  with the other settings.
+- **Automatic MCA spectrum files in a series** — each MCA run of a series saves its
+  spectrum as a CSV in the **Export CSV** format, with the run's numbered name (next
+  to its list-mode file, if recorded). The histogram is read again after the run
+  stopped; if that read fails, the last live readback is saved and marked
+  `# source=last live readback`.
+- **Current time limit** — the Current view has a **Time [s]** field that stops IIR,
+  Scope DMA and periodic-sum acquisitions after that many seconds (host clock; for
+  Scope DMA, counted from the start of streaming). 0 runs until **Stop**, as before.
+
 ## [0.9.2] — 2026-11-19
 
 Connection-loss handling and a waveform drawing choice: a lost board connection

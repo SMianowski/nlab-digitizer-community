@@ -26,6 +26,11 @@ from PySide6.QtWidgets import QFileDialog, QMenu, QSlider, QSpinBox, QWidget
 
 from nlab import settings_keys
 from nlab.analysis.scope_distribution import AccumulatedAmplitudeHistogram, HistogramMode
+from nlab.controllers.measurement_series import (
+    MeasurementSeries,
+    owner_series,
+    time_limit_required_message,
+)
 from nlab.hardware.digitizer.current_monitor import (
     ScopeCurrentAccumulator,
     ScopeCurrentPreview,
@@ -47,7 +52,11 @@ from nlab.hardware.digitizer.scope import (
     range_spec,
 )
 from nlab.ui.ui_scope_view import Ui_ScopeView
-from nlab.utils.recording_paths import measurement_folder, unique_recording_path
+from nlab.utils.recording_paths import (
+    available_path,
+    measurement_folder,
+    unique_recording_path,
+)
 from nlab.views import theme
 from nlab.views.numeric_controls import normalize_numeric_control
 from nlab.views.panel_status import PanelStatus
@@ -213,6 +222,15 @@ class ScopeController(QWidget):
         self._session_replay_display_mode: int | None = None
         self._replay_hardware_interlocked = False
 
+        self._series = MeasurementSeries(
+            self,
+            spinbox=self.ui.spinSeriesRuns,
+            label=self.ui.labelSeriesRuns,
+            name=f"Scope ch{channel}",
+            is_idle=self._series_idle,
+            start_run=self._start_series_run,
+        )
+
         self._apply_parameter_specs()
         self._send_defaults()
         self._load_hardware_state()
@@ -232,6 +250,11 @@ class ScopeController(QWidget):
     def measurement_active(self) -> bool:
         """Last lifecycle-confirmed continuous run; excludes single-frame reads."""
         return bool(getattr(self, "_measurement_active", False))
+
+    @property
+    def last_dma_error(self) -> str | None:
+        """Error of the latest DMA session, or None; cleared when the next one starts."""
+        return self._dma_last_error
 
     def _set_measurement_active(self, active: bool) -> None:
         if getattr(self, "_measurement_active", False) != active:
@@ -386,6 +409,7 @@ class ScopeController(QWidget):
             "persistence": self.ui.dialPersistence.value(),
             "refresh_rate_hz": self.ui.spinRefreshRate.value(),
             "measurement_time_s": self.ui.spinTime.value(),
+            "series_runs": self._series.runs(),
             "dma_enabled": self.ui.cbDmaEnable.isChecked(),
             "histogram_mode": self._amplitude_histogram.mode.value,
         }
@@ -402,6 +426,8 @@ class ScopeController(QWidget):
             self.ui.spinRefreshRate.setValue(int(settings["refresh_rate_hz"]))
         if "measurement_time_s" in settings:
             self.ui.spinTime.setValue(int(settings["measurement_time_s"]))
+        if "series_runs" in settings:
+            self._series.set_runs(int(settings["series_runs"]))
         if "dma_enabled" in settings:
             self.ui.cbDmaEnable.setChecked(bool(settings["dma_enabled"]))
         if "histogram_mode" in settings:
@@ -747,7 +773,7 @@ class ScopeController(QWidget):
             self._on_trigger_mode_changed
         )
         self.ui.cbDmaEnable.toggled.connect(self._on_dma_toggled)
-        self.ui.btnStart.clicked.connect(self._on_start)
+        self.ui.btnStart.clicked.connect(self._on_start_clicked)
         self.ui.btnStop.clicked.connect(self._on_stop)
         self.ui.btnAutoSetup.clicked.connect(self._on_auto_setup)
         self.ui.btnAcquireFrame.clicked.connect(self._on_acquire_frame)
@@ -1062,6 +1088,8 @@ class ScopeController(QWidget):
             or self._scope.dma_active()
         ):
             raise RuntimeError("stop the active Scope acquisition before starting periodic sums")
+        if (series := owner_series(self)) is not None:
+            series.cancel()  # Current now owns the Scope transport.
         mode = self._scope.get_trigger_mode()
         if mode == TriggerMode.PERIODIC_SUM:
             raise RuntimeError("select a waveform trigger in Scope before starting periodic sums")
@@ -1245,6 +1273,8 @@ class ScopeController(QWidget):
             raise RuntimeError("Scope Auto Setup is active")
         if self._dma_worker is not None or self._dma_thread is not None:
             raise RuntimeError("Scope DMA is already active on this channel")
+        if (series := owner_series(self)) is not None:
+            series.cancel()  # Current now owns the Scope transport.
 
         if self.ui.btnStart.isChecked() or self._refresh_timer.isActive():
             self._on_stop()
@@ -1372,6 +1402,54 @@ class ScopeController(QWidget):
     def _on_dma_toggled(self, _enabled: bool) -> None:
         self._update_viewer_transport_hint()
 
+    # ------------------------------------------------------------------
+    # Measurement series
+    # ------------------------------------------------------------------
+
+    def set_measurement_series_enabled(self, enabled: bool) -> None:
+        """Apply Settings > Enable Series to this view."""
+        self._series.set_enabled(enabled)
+
+    def _on_start_clicked(self) -> None:
+        """Operator Start: begins a series when Settings > Enable Series is on."""
+        series = self._series
+        if not series.begin(self.ui.spinTime.value()):
+            self.ui.btnStart.setChecked(False)
+            self.status.setText(time_limit_required_message(series.runs()))
+            return
+        try:
+            self._on_start()
+        finally:
+            if series.active and self._series_idle():
+                series.cancel()  # Start was declined and already reported why.
+
+    def _series_idle(self) -> bool:
+        """No run, reader thread, sum session or Auto Setup holds this Scope."""
+        return (
+            not self.measurement_active
+            and self._dma_worker is None
+            and self._dma_thread is None
+            and self._sum_worker is None
+            and self._auto_setup_thread is None
+            and not self._refresh_timer.isActive()
+        )
+
+    def _start_series_run(self) -> None:
+        if self.ui.btnStart.isEnabled():
+            self._on_start()
+
+    def _next_dma_filepath(self) -> Path:
+        """The chosen or generated recording, numbered while a series runs."""
+        series = owner_series(self)
+        numbered = None if series is None else series.recording_path(
+            lambda: self._dma_filepath or self._generate_filepath()
+        )
+        if numbered is None:
+            return self._dma_filepath or self._generate_filepath()
+        filepath = available_path(numbered)
+        log.info("Scope DMA: series filepath: %s", filepath)
+        return filepath
+
     def _on_start(self) -> None:
         if getattr(self, "_replay_hardware_interlocked", False) or getattr(
             self,
@@ -1435,7 +1513,7 @@ class ScopeController(QWidget):
         filepath = (
             None
             if self._dma_online_current
-            else self._dma_filepath or self._generate_filepath()
+            else ScopeController._next_dma_filepath(self)
         )
         self._dma_filepath = None
 
@@ -1517,6 +1595,9 @@ class ScopeController(QWidget):
             self.stop_current_sum_monitor()
             self.status.setText("Stopping Current periodic sums; draining accepted windows...")
             return
+        series = owner_series(self)
+        if series is not None:
+            series.stop_requested()
         self._raw_curve.cancelDrag()
         self._cancel_pretrigger_line_drag()
         if self._waveform_pending_status is not None:
@@ -1560,6 +1641,8 @@ class ScopeController(QWidget):
         self.ui.btnDmaFile.setEnabled(True)
         self.ui.btnAutoSetup.setEnabled(self._scope.dac_available())
         log.info("Scope ch%d: acquisition stopped", self._channel)
+        if series is not None:
+            series.run_ended()
 
     # ------------------------------------------------------------------
     # Auto Setup
@@ -1581,6 +1664,9 @@ class ScopeController(QWidget):
             return
         if self._dma_worker is not None or self._dma_thread is not None:
             self.status.setText("Stop DMA recording before Auto Setup")
+            return
+        if (series := owner_series(self)) is not None and series.active:
+            self.status.setText("Stop the measurement series before Auto Setup")
             return
         if self._refresh_timer.isActive() or self._scope.get_enable():
             self.status.setText("Stop acquisition before Auto Setup")
@@ -1703,6 +1789,8 @@ class ScopeController(QWidget):
 
     def _on_measurement_timeout(self) -> None:
         log.info("Scope ch%d: measurement time limit reached", self._channel)
+        if (series := owner_series(self)) is not None:
+            series.mark_completed()
         self._on_stop()
 
     def _on_refresh_rate_changed(self, value: int) -> None:
@@ -1793,6 +1881,8 @@ class ScopeController(QWidget):
         self._refresh_timer.stop()
         self._discard_inflight_frame = True
         self._acquiring = False
+        if (series := owner_series(self)) is not None:
+            series.cancel()
         if self._dma_worker is None:
             self._raw_curve.cancelDrag()
             self._cancel_pretrigger_line_drag()
@@ -2390,6 +2480,8 @@ class ScopeController(QWidget):
         log.error("Scope DMA error: %s", message)
         self._dma_last_error = message
         self.status.setText(f"Error: {message}")
+        if (series := owner_series(self)) is not None:
+            series.cancel()
 
     @Slot()
     def _on_dma_finished(self) -> None:
@@ -2440,6 +2532,7 @@ class ScopeController(QWidget):
             )
         log.info("Scope DMA: worker finished; restoring controls")
         ScopeController._set_measurement_active(self, False)
+        series_error = self._dma_last_error
         try:
             if getattr(self, "_session_replay_active", False):
                 self._apply_session_replay_controls()
@@ -2454,6 +2547,7 @@ class ScopeController(QWidget):
             self.ui.btnAutoSetup.setEnabled(self._scope.dac_available())
 
             if self._scope.dma_fault_is_latched():
+                series_error = series_error or "DMA fault"
                 # A genuine EIO blocks rearm until the passive recovery check.
                 try:
                     self._scope.acknowledge_dma_recovery()
@@ -2499,6 +2593,10 @@ class ScopeController(QWidget):
                     False,
                     self._dma_last_error or "Scope DMA stopped.",
                 )
+            elif (series := owner_series(self)) is not None:
+                # The buffer and reader thread are released: the next series
+                # run, if any, re-arms from a closed buffer.
+                series.run_ended(series_error)
 
     def stop_dma_sync(self) -> None:
         """Blocking stop for shutdown, reconnect, or isolated session replay.
@@ -2521,6 +2619,8 @@ class ScopeController(QWidget):
         memory just keeps showing whatever it last captured before the
         app closed, looking permanently frozen.
         """
+        if (series := owner_series(self)) is not None:
+            series.cancel()
         self.stop_current_sum_monitor(wait=True)
         auto_worker = self._auto_setup_worker
         auto_thread = self._auto_setup_thread

@@ -167,6 +167,7 @@ class MCAResponsiveLayout(QObject):
         )
         self._measurement_entries: tuple[QLayout | QWidget, ...] = (
             ui.vTime,
+            ui.vSeries,
             ui.vStartStop,
             ui.vRefresh,
             ui.vDmaFile,
@@ -193,6 +194,7 @@ class MCAResponsiveLayout(QObject):
             widget: widget.maximumWidth()
             for widget in (
                 ui.spinTimeLimit,
+                ui.spinSeriesRuns,
                 ui.spinRefreshRate,
                 ui.btnStart,
                 ui.btnStop,
@@ -253,6 +255,7 @@ class MCAResponsiveLayout(QObject):
         ui.layoutMeasurement.setSpacing(4)
         for widget, width in (
             (ui.spinTimeLimit, 112),
+            (ui.spinSeriesRuns, 72),
             (ui.spinRefreshRate, 72),
             (ui.btnStart, 76),
             (ui.btnStop, 76),

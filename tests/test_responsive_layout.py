@@ -247,7 +247,7 @@ def test_mca_header_groups_move_into_scrollable_controls(qtbot: QtBot) -> None:
     assert ui.layoutMca.direction() == QBoxLayout.Direction.TopToBottom
     assert ui.layoutMca.count() == 4
     assert ui.layoutMeasurement.direction() == QBoxLayout.Direction.TopToBottom
-    assert ui.layoutMeasurement.count() == 2
+    assert ui.layoutMeasurement.count() == 3
     assert ui.controlLayout.indexOf(ui.groupMca) == 0
     assert ui.controlLayout.indexOf(ui.groupMeasurement) == 1
     assert ui.controlLayout.indexOf(ui.groupSignal) == 2
@@ -278,7 +278,7 @@ def test_mca_restores_original_layout_after_returning_to_1080p(qtbot: QtBot) -> 
     assert ui.layoutMca.direction() == QBoxLayout.Direction.LeftToRight
     assert ui.layoutMca.count() == 7
     assert ui.layoutMeasurement.direction() == QBoxLayout.Direction.LeftToRight
-    assert ui.layoutMeasurement.count() == 4
+    assert ui.layoutMeasurement.count() == 5
     assert ui.mainLayout.itemAt(0).layout() is ui.topRow
     assert ui.topRow.indexOf(ui.groupMca) == 0
     assert ui.topRow.indexOf(ui.groupMeasurement) == 1

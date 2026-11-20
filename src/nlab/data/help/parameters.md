@@ -189,6 +189,27 @@ The field does not change the waveform sample period, trigger threshold, or
 histogram polling frequency. Wait for recording completion before treating
 an output file as final.
 
+## Acquisition — measurement series {#series}
+
+**Settings → Enable Series** enables **Repeats** in Scope, MCA and Current. One
+Start then performs that many runs, each lasting the selected duration. Every run
+is an ordinary measurement: the next one starts only after the previous run has
+stopped and released the board, including the complete drain and close of a DMA
+recording. More than one run needs a duration above 0. **Stop**, an error, a lost
+connection, session replay or a coincidence session ends the series; a failed run
+is never repeated automatically. Unchecking the option makes the run in progress
+the last one.
+
+While the option is checked, recordings share one name followed by `_001`,
+`_002`, …: the file chosen with **DMA File…** (or typed for Current sums), or the
+generated default. An existing file is never replaced; a name already in use gains
+a further `_NNN`. With **Record list-mode DMA** checked, every MCA run writes its
+own list-mode file, closed and complete before the next run arms. Each MCA run
+also saves its spectrum as a CSV with the same name, in the **Export CSV** format,
+read again after the run stopped. If the stopped
+spectrum cannot be read, the last live readback is saved and marked as such.
+A run ended with Stop keeps its recording and spectrum.
+
 ## Display — refresh rate {#refresh}
 
 Refresh controls how often the client requests or presents monitoring updates.

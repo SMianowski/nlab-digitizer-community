@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -23,6 +23,11 @@ from nlab.analysis.energy_calibration import (
     EnergyCalibration,
     FingerprintValue,
     SpectrumSnapshot,
+)
+from nlab.controllers.measurement_series import (
+    MeasurementSeries,
+    owner_series,
+    time_limit_required_message,
 )
 from nlab.hardware.digitizer.dma import IIOMcaDmaStreamer, McaEventBuffer
 from nlab.hardware.digitizer.mca import (
@@ -123,6 +128,12 @@ def _mca_widget_spec(parameter: MCAParam) -> RangeSpec:
     return spec.scaled(2) if parameter in _MCA_TIMING_PARAMETERS else spec
 _THRESHOLD_MARKER_COLOR = "#a66f6f"
 _PRETRIGGER_MARKER_COLOR = "#648b71"
+# A series core name must be free for every file a run can write.
+_SERIES_SUFFIXES = (
+    *(mode.extension for mode in McaDmaOutputMode if mode.extension),
+    ".yaml",
+    ".run.json",
+)
 
 _MCA_CONTROL_TOOLTIPS = {
     "comboPulsePolarity": "Selects whether pulses are expected to be negative or positive.",
@@ -242,6 +253,16 @@ class MCAController(QWidget):
         self._coincidence_buffer: McaEventBuffer | None = None
         self._coincidence_metadata: dict[str, object] | None = None
         self._coincidence_role = CoincidenceRole.NONE
+        # Spectrum CSV of the current series run, written when that run ends.
+        self._series_spectrum_path: Path | None = None
+        self._series = MeasurementSeries(
+            self,
+            spinbox=self.ui.spinSeriesRuns,
+            label=self.ui.labelSeriesRuns,
+            name=f"MCA ch{channel}",
+            is_idle=self._series_idle,
+            start_run=self._start_series_run,
+        )
 
         self._last_histogram: np.ndarray | None = None
         self._display_histogram: np.ndarray | None = None
@@ -303,6 +324,8 @@ class MCAController(QWidget):
         if enabled == self._replay_hardware_interlocked:
             return
         self._replay_hardware_interlocked = enabled
+        if enabled and (series := owner_series(self)) is not None:
+            series.cancel()
         if enabled and (
             self._worker is not None
             or self._dma_worker is not None
@@ -1179,6 +1202,8 @@ class MCAController(QWidget):
             raise RuntimeError(f"MCA ch{self._channel} is already in use")
         if self._mca_dma is None:
             raise RuntimeError("coincidence requires IIO MCA list-mode DMA")
+        if (series := owner_series(self)) is not None:
+            series.cancel()  # The coincidence coordinator now owns this channel.
         event_buffer.clear()
         self._event_buffer.subscribe(event_buffer)
         self._coincidence_buffer = event_buffer
@@ -1262,6 +1287,7 @@ class MCAController(QWidget):
             "refresh_rate_hz": self.ui.spinRefreshRate.value(),
             "roi": [float(value) for value in self._roi.getRegion()],
             "dma_enabled": self.ui.cbDmaEnable.isChecked(),
+            "series_runs": self._series.runs(),
         }
         if self._energy_calibration is not None:
             settings["energy_calibration"] = self._energy_calibration.to_dict()
@@ -1274,6 +1300,8 @@ class MCAController(QWidget):
             self.ui.spinRefreshRate.setValue(int(settings["refresh_rate_hz"]))
         if "dma_enabled" in settings:
             self.ui.cbDmaEnable.setChecked(bool(settings["dma_enabled"]))
+        if "series_runs" in settings:
+            self._series.set_runs(int(settings["series_runs"]))
         roi = settings.get("roi")
         if isinstance(roi, list) and len(roi) == 2:
             self._roi.setRegion((float(roi[0]), float(roi[1])))
@@ -1745,7 +1773,7 @@ class MCAController(QWidget):
                 lambda: self._mca.set_time_limit(self.ui.spinTimeLimit.value())
             )
         )
-        self.ui.btnStart.clicked.connect(self._on_start)
+        self.ui.btnStart.clicked.connect(self._on_start_clicked)
         self.ui.btnStop.clicked.connect(self._on_stop)
         self.ui.btnClearSpectrum.clicked.connect(self._on_clear_spectrum)
         self.ui.btnExportCsv.clicked.connect(self._on_export_csv)
@@ -1954,6 +1982,102 @@ class MCAController(QWidget):
         slider.sliderReleased.connect(commit)
 
     # ------------------------------------------------------------------
+    # Measurement series
+    # ------------------------------------------------------------------
+
+    def set_measurement_series_enabled(self, enabled: bool) -> None:
+        """Apply Settings > Enable Series to this view."""
+        self._series.set_enabled(enabled)
+
+    def _on_start_clicked(self) -> None:
+        """Operator Start: begins a series when Settings > Enable Series is on."""
+        series = self._series
+        if not series.begin(self.ui.spinTimeLimit.value()):
+            self.ui.btnStart.setChecked(False)
+            self.status.setText(time_limit_required_message(series.runs()))
+            return
+        try:
+            self._on_start()
+        finally:
+            if series.active and self._series_idle():
+                series.cancel()  # Start was declined and already reported why.
+
+    def _series_idle(self) -> bool:
+        """Polling and list-mode workers have exited; no coincidence owns the MCA."""
+        return (
+            self._worker is None
+            and self._worker_thread is None
+            and self._dma_worker is None
+            and self._dma_thread is None
+            and _coincidence_role(self) is CoincidenceRole.NONE
+        )
+
+    def _start_series_run(self) -> None:
+        if self.ui.btnStart.isEnabled():
+            self._on_start()
+
+    def _take_series_base_path(self) -> Path:
+        """Core name of one series: the chosen DMA file, or a new default."""
+        chosen, self._dma_filepath = self._dma_filepath, None
+        if chosen is not None:
+            return chosen
+        return unique_recording_path(
+            f"ch{self._channel}",
+            ".csv",
+            sidecar_suffixes=_SERIES_SUFFIXES,
+        )
+
+    def _series_recording_base(self) -> Path | None:
+        """This run's numbered core name; None outside a measurement series."""
+        series = owner_series(self)
+        if series is None:
+            return None
+        return series.recording_path(self._take_series_base_path)
+
+    def _save_series_spectrum(self) -> bool:
+        """Write the finished series run's spectrum; False when it could not be saved.
+
+        The histogram is read again after the acquisition stopped, when the
+        pulse processor publishes a stable snapshot; the last live readback
+        may predate the end of the run. Without a stopped readout (for example
+        an iiod build that cannot read the histogram attribute) the last live
+        readback is written and labelled as such.
+        """
+        path = getattr(self, "_series_spectrum_path", None)
+        if path is None:
+            return True
+        self._series_spectrum_path = None
+        if getattr(self, "_connection_lost", False):
+            log.warning("MCA ch%d: connection lost; spectrum %s not saved", self._channel, path)
+            return False
+        source = "stopped hardware readout"
+        try:
+            histogram: np.ndarray | None = np.asarray(self._mca.acquire_spectrum())
+            elapsed_s = self._mca.statistics.get_elapsed_time() / 10.0
+        except Exception:
+            log.warning(
+                "MCA ch%d: stopped spectrum readout failed; saving the last live readback",
+                self._channel,
+                exc_info=True,
+            )
+            histogram = self._last_histogram
+            elapsed_s = self._last_elapsed_s
+            source = "last live readback"
+        if histogram is None or len(histogram) == 0:
+            log.warning("MCA ch%d: no spectrum to save for %s", self._channel, path)
+            self.status.setText("Series spectrum not saved: no spectrum was read")
+            return False
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._write_spectrum_csv(path, histogram, elapsed_s, source=source)
+        except OSError as exc:
+            log.error("MCA ch%d: could not save spectrum %s: %s", self._channel, path, exc)
+            self.status.setText(f"Series spectrum not saved: {exc}")
+            return False
+        log.info("MCA ch%d: series spectrum saved to %s (%s)", self._channel, path, source)
+        return True
+
+    # ------------------------------------------------------------------
     # Measurement Start / Stop / Clear
     # ------------------------------------------------------------------
 
@@ -1991,6 +2115,9 @@ class MCAController(QWidget):
             # driver accepts enable=0 even when a configuration write has
             # just failed with EBUSY.
             log.exception("MCA ch%d: measurement start failed", self._channel)
+            if (series := owner_series(self)) is not None:
+                series.cancel()
+            self._series_spectrum_path = None
             MCAController._set_measurement_active(self, False)
             self._stop_worker()
             try:
@@ -2019,6 +2146,9 @@ class MCAController(QWidget):
         # pp_field_store() returns EBUSY on the next run.
         self._mca.stop()
         self._mca.set_time_limit(self.ui.spinTimeLimit.value())
+        series_base = MCAController._series_recording_base(self)
+        if series_base is not None:
+            self._series_spectrum_path = available_path(series_base.with_suffix(".csv"))
         self._mca.start()
         MCAController._set_measurement_active(self, True)
         self._set_controls_enabled(True)
@@ -2034,6 +2164,8 @@ class MCAController(QWidget):
         if _coincidence_role(self) is CoincidenceRole.ACTIVE:
             self.coincidence_stop_requested.emit()
             return
+        if (series := owner_series(self)) is not None:
+            series.stop_requested()
         self._cancel_debug_marker_drags()
         self.ui.btnStop.setChecked(True)
 
@@ -2062,6 +2194,9 @@ class MCAController(QWidget):
         MCAController.refresh_dma_output_settings(self)
         log.info("MCA ch%d: measurement stopped", self._channel)
         self._check_stopped_health()
+        if self._dma_worker is None:
+            # A stopped series run keeps its spectrum; list mode saves on close.
+            MCAController._save_series_spectrum(self)
 
     def _on_measurement_done(self) -> None:
         """Called when the hardware stops the measurement (time limit reached).
@@ -2076,6 +2211,9 @@ class MCAController(QWidget):
         if _coincidence_role(self) is CoincidenceRole.ACTIVE:
             self.coincidence_stop_requested.emit()
             return
+        series = owner_series(self)
+        if series is not None:
+            series.mark_completed()
         if self._dma_worker is not None:
             # Match the manual-stop ordering: prevent another refill, then
             # release enable so the close path can drain the tail.
@@ -2092,6 +2230,11 @@ class MCAController(QWidget):
         MCAController.refresh_dma_output_settings(self)
 
         self._check_stopped_health()
+        if self._dma_worker is None:
+            # List-mode runs end in _on_dma_finished(), after the buffer closed.
+            saved = MCAController._save_series_spectrum(self)
+            if series is not None:
+                series.run_ended(None if saved else "spectrum CSV not saved")
 
     def _on_clear_spectrum(self) -> None:
         if getattr(self, "_replay_hardware_interlocked", False):
@@ -2123,9 +2266,29 @@ class MCAController(QWidget):
         if not path:
             return
 
+        roi_lines = (
+            self.ui.lblRoiStats.text().splitlines() if self._roi.isVisible() else []
+        )
+        self._write_spectrum_csv(
+            Path(path), self._last_histogram, self._last_elapsed_s, roi_lines=roi_lines,
+        )
+        log.info("MCA ch%d: spectrum exported to %s", self._channel, path)
+
+    def _write_spectrum_csv(
+        self,
+        path: Path,
+        histogram: np.ndarray,
+        elapsed_s: float,
+        *,
+        roi_lines: Sequence[str] = (),
+        source: str | None = None,
+    ) -> None:
+        """Write the Export CSV format: comment header, then one row per channel."""
         with open(path, "w", newline="") as f:
             f.write(f"# MCA channel {self.channel_label} spectrum export\n")
-            f.write(f"# elapsed_s={self._last_elapsed_s:.1f}\n")
+            f.write(f"# elapsed_s={elapsed_s:.1f}\n")
+            if source is not None:
+                f.write(f"# source={source}\n")
             calibration = self._energy_calibration
             if calibration is not None:
                 f.write(f"# energy_calibration_model={calibration.model}\n")
@@ -2134,18 +2297,15 @@ class MCAController(QWidget):
                     + ",".join(f"{value:.17g}" for value in calibration.coefficients_kev)
                     + "\n"
                 )
-            if self._roi.isVisible():
-                for line in self.ui.lblRoiStats.text().splitlines():
-                    f.write(f"# {line}\n")
+            for line in roi_lines:
+                f.write(f"# {line}\n")
             f.write("channel,energy_kev,counts\n" if calibration else "channel,counts\n")
-            for ch, counts in enumerate(self._last_histogram):
+            for ch, counts in enumerate(histogram):
                 if calibration is None:
                     f.write(f"{ch},{int(counts)}\n")
                 else:
                     energy = float(self._calibrated_energy(ch))
                     f.write(f"{ch},{energy:.12g},{int(counts)}\n")
-
-        log.info("MCA ch%d: spectrum exported to %s", self._channel, path)
 
     # ------------------------------------------------------------------
     # Polling worker lifecycle
@@ -2223,6 +2383,9 @@ class MCAController(QWidget):
 
     def _on_connection_lost(self, message: str) -> None:
         self._connection_lost = True
+        if (series := owner_series(self)) is not None:
+            series.cancel()
+        self._series_spectrum_path = None
         MCAController._set_measurement_active(self, False)
         self.status.setText(
             f"Connection lost: {message}; use Connection -> Reconnect Device."
@@ -2359,9 +2522,22 @@ class MCAController(QWidget):
         self._dma_summary = None
         self._dma_error = None
         self._dma_started_monotonic = time.monotonic()
-        filepath = None if mode is McaDmaOutputMode.ONLINE else (
-            self._dma_filepath or self._generate_filepath(mode)
-        )
+        series_base = MCAController._series_recording_base(self)
+        if series_base is not None:
+            # One numbered stem per run: list-mode file, sidecars and spectrum.
+            filepath = None if mode is McaDmaOutputMode.ONLINE else available_path(
+                series_base.with_suffix(mode.extension),
+                sidecar_suffixes=(*MCAController._sidecar_suffixes(mode), ".csv"),
+            )
+            self._series_spectrum_path = (
+                filepath.with_suffix(".csv")
+                if filepath is not None
+                else available_path(series_base.with_suffix(".csv"))
+            )
+        else:
+            filepath = None if mode is McaDmaOutputMode.ONLINE else (
+                self._dma_filepath or self._generate_filepath(mode)
+            )
         if filepath is not None and filepath.suffix.lower() != mode.extension:
             filepath = self._available_filepath(
                 filepath.with_suffix(mode.extension),
@@ -2557,6 +2733,8 @@ class MCAController(QWidget):
         log.error("MCA DMA error: %s", message)
         self._dma_error = message
         self.status.setText(f"Error: {message}")
+        if (series := owner_series(self)) is not None:
+            series.cancel()
         if self._psd_capture is not None:
             self._psd_capture.set_capture_error(message)
         if _coincidence_role(self) is not CoincidenceRole.NONE:
@@ -2629,6 +2807,15 @@ class MCAController(QWidget):
                     self.status.setText(
                         "Connection lost; use Connection -> Reconnect Device."
                     )
+                # The list buffer is closed and its reader joined: save this
+                # run's spectrum, then start the next series run, if any.
+                saved = MCAController._save_series_spectrum(self)
+                if (series := owner_series(self)) is not None:
+                    series.run_ended(
+                        self._dma_error
+                        or ("connection lost" if self._connection_lost else None)
+                        or (None if saved else "spectrum CSV not saved")
+                    )
             log.info("MCA ch%d: DMA worker cleanup complete", self._channel)
             self._sync_recovery_controls()
         finally:
@@ -2652,6 +2839,9 @@ class MCAController(QWidget):
         measurement armed indefinitely, since nothing in the shutdown
         path called mca.stop() for that case.
         """
+        if (series := owner_series(self)) is not None:
+            series.cancel()
+        self._series_spectrum_path = None
         worker = self._dma_worker
         thread = self._dma_thread
         if worker is not None:

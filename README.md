@@ -104,7 +104,22 @@ Current periodic sums record to a compact binary `.bin` file (default) or to
 HDF5 (`.h5`), in the measurement folder from General Settings. Leave the
 filename blank for `ch0_current_<timestamp>.bin` on Start, or enter your own
 name or path. Saving runs in the background and asks before
-replacing an existing file.
+replacing an existing file. **Time [s]** stops a Current acquisition after that
+many seconds; 0 runs until **Stop**.
+
+### Repeat a measurement
+
+Check **Settings → Enable Series** to enable **Repeats** in Scope, MCA and Current.
+Set **Time [s]** above 0 and the number of runs, then click **Start** once: each
+run stops on its time limit, and the next starts after the previous one has fully
+stopped (including the DMA drain). **Stop**, an error or a lost connection ends the
+series. While the option is checked, recordings keep one name with a run number,
+such as `run_001.bin`, `run_002.bin`: the file you chose, or the generated default.
+Existing files are never replaced. Each MCA run also saves its spectrum as a CSV
+with the same name, for example `run_001.csv`; with **Record list-mode DMA**
+checked, every run also writes its own complete list-mode file beside it
+(`run_001.bin`, `run_002.bin`, …).
+
 The [acquisition guide](https://github.com/nucliflare/nlab-digitizer-community/wiki/acquisition_workflows)
 covers recording and advanced workflows.
 

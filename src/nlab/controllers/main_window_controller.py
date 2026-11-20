@@ -1209,6 +1209,16 @@ class MainWindowController:
         for controller in self._scope_controllers:
             controller.clear_scope_distribution()
 
+    def set_measurement_series_enabled(self, enabled: bool) -> None:
+        """Apply Settings > Enable Series to every Scope, MCA and Current view."""
+        for scope_controller in self._scope_controllers:
+            scope_controller.set_measurement_series_enabled(enabled)
+        for mca_controller in self._mca_controllers:
+            mca_controller.set_measurement_series_enabled(enabled)
+        for current_controller in self._current_monitor_controllers:
+            current_controller.set_measurement_series_enabled(enabled)
+        log.info("Measurement series %s", "enabled" if enabled else "disabled")
+
     def set_roi_visible(self, visible: bool) -> None:
         """Toggle the ROI selection tool + stats panel on every MCA histogram."""
         for ctrl in self._mca_controllers:

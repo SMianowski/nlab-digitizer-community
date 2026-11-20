@@ -357,6 +357,36 @@
          </layout>
         </item>
         <item>
+         <layout class="QHBoxLayout" name="horizontalLayoutSeries">
+          <item>
+           <widget class="QLabel" name="labelSeriesRuns">
+            <property name="text">
+             <string>Repeats</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QSpinBox" name="spinSeriesRuns">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <property name="toolTip">
+             <string>Number of runs one Start performs; check Settings &gt; Enable Series to use it.</string>
+            </property>
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>9999</number>
+            </property>
+            <property name="value">
+             <number>1</number>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
          <widget class="QLabel" name="labelElapsedTime">
           <property name="toolTip">
            <string>Host-clock elapsed time for the current continuous Scope run, starting when acquisition starts (DMA ready for recording). Excludes arming and single-frame reads; retains the final value after stopping. Not hardware live time or recorded waveform duration.</string>

@@ -185,6 +185,7 @@
    <widget class="QMenu" name="menuSettings">
     <property name="title"><string>Settings</string></property>
     <addaction name="actionGeneralSettings"/>
+    <addaction name="actionEnableSeries"/>
     <addaction name="separator"/>
     <addaction name="actionSaveSettings"/>
     <addaction name="actionLoadSettings"/>
@@ -284,6 +285,11 @@
   </action>
   <action name="actionGeneralSettings">
    <property name="text"><string>General Settings...</string></property>
+  </action>
+  <action name="actionEnableSeries">
+   <property name="checkable"><bool>true</bool></property>
+   <property name="text"><string>Enable Series</string></property>
+   <property name="toolTip"><string>Enable the Repeats control in the Scope, MCA and Current views: one Start runs the measurement that many times and numbers each recording</string></property>
   </action>
   <action name="actionLoadSettings">
    <property name="text"><string>Load Settings...</string></property>
