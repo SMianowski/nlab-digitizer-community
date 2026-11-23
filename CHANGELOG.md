@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-11-23
+
+General Settings lists its groups as categories and can add the start time to
+recording names you choose. The Scope plot follows a restored frame length,
+formulas inside Help sentences render, long tooltips wrap, panel undock buttons
+are full size, and External modules use nlab-modbus 0.3.0.
+
 ### Added
 
 - **Timestamps on chosen file names** — **General Settings → Acquisition files →
