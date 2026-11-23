@@ -1120,10 +1120,19 @@ and diagnostics when reporting peak measurements.
 ## Analysis — PSD event readback {#psd-readback}
 
 The **File** menu contains **Load event file...**, **Cancel loading**,
-**Download report...**, and **Close workbench**. **Analysis** provides Gaussian
-fitting and fit-table copy. **View** toggles PSD ROI and FOM guides, synchronized
-with the plot controls; **Help** opens this bundled guide. Window-local shortcuts
-are **Ctrl+O** (load), **Ctrl+S** (report), and **Ctrl+W** (close).
+**Download report...**, and **Close workbench**. **Analysis** provides
+**Recalculate PSD matrix**, Gaussian fitting and fit-table copy. **View** toggles
+PSD ROI and FOM guides, synchronized with the plot controls; **Help** opens this
+bundled guide. Window-local shortcuts are **Ctrl+O** (load), **Ctrl+R**
+(recalculate), **Ctrl+S** (report), and **Ctrl+W** (close).
+
+The histogram settings apply when the matrix is built. After you change them
+(press Enter or leave the settings), the workbench asks whether to rebuild the
+matrix from the loaded file; moving between the settings does not interrupt you.
+**Yes** reads every event again, keeps the PSD cut and energy ROI, and clears the
+FOM fit. After **No**, the plot keeps its previous settings until you choose
+**Analysis → Recalculate PSD matrix**, and the same values are not asked about
+again.
 The current filename (or "No file loaded") is shown in the window title, with no
 separate file-label row. Histogram spinners and matrix
 scale/PSD-cut/ROI controls are in a compact left sidebar beside the full-height

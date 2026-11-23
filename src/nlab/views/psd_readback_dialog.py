@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QSettings, Qt, QThread
+from PySide6.QtCore import QEvent, QObject, QSettings, Qt, QThread, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QAbstractSpinBox,
     QApplication,
     QBoxLayout,
     QDialog,
@@ -33,6 +35,7 @@ from nlab.analysis.psd import PsdAccumulator
 from nlab.analysis.psd_file import PsdEventFileInfo, inspect_psd_event_file
 from nlab.help.context import HelpContext
 from nlab.views.help_dialog import HelpDialog
+from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.offline_psd_plot import OfflinePsdPlot
 from nlab.views.tooltips import wrap_tooltip, wrap_widget_tooltips
 from nlab.views.window_flags import make_tool_window
@@ -40,6 +43,9 @@ from nlab.workers.psd_file_worker import PsdFileWorker
 
 log = logging.getLogger(__name__)
 _WINDOW_TITLE = "PSD Event Readback"
+
+# Energy bins, ratio bins, energy right shift, (ratio minimum, ratio maximum).
+HistogramSettings = tuple[int, int, int, tuple[float, float]]
 
 
 class PsdReadbackDialog(QDialog):
@@ -59,6 +65,9 @@ class PsdReadbackDialog(QDialog):
         self._processed_events = 0
         self._menu_control_actions: dict[QAbstractButton, QAction] = {}
         self._help_dialog: HelpDialog | None = None
+        # Settings the user chose not to apply yet; asked again only after a change.
+        self._declined_settings: HistogramSettings | None = None
+        self._asking_recalculation = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -109,6 +118,12 @@ class PsdReadbackDialog(QDialog):
             label = QLabel(text, self)
             label.setBuddy(field)
             form.addRow(label, field)
+        for control in self._histogram_controls():
+            control.editingFinished.connect(partial(self._histogram_edit_finished, control))
+        for spinbox in (self.energy_bins, self.ratio_bins, self.energy_shift):
+            spinbox.valueChanged.connect(self._update_recalculate_action)
+        for double_spinbox in (self.ratio_min, self.ratio_max):
+            double_spinbox.valueChanged.connect(self._update_recalculate_action)
         sidebar.addWidget(settings)
 
         self.plot = OfflinePsdPlot(self)
@@ -139,6 +154,7 @@ class PsdReadbackDialog(QDialog):
         self._build_menu_bar(root)
         self.plot.fom_widget.fit_changed.connect(self._fit_changed)
         wrap_widget_tooltips(self)
+        keep_enter_in_fields(self)  # Enter commits a histogram field; it must not Fit
 
     def _build_menu_bar(self, root: QVBoxLayout) -> None:
         self.menu_bar = QMenuBar(self)
@@ -167,6 +183,18 @@ class PsdReadbackDialog(QDialog):
             action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
 
         self.analysis_menu = self.menu_bar.addMenu("&Analysis")
+        # A menu action, not a button: a dialog's push button is its default
+        # button, so Enter in a histogram field would rebuild without asking.
+        self.recalculate_action = self.analysis_menu.addAction("Recalculate PSD matrix")
+        self.recalculate_action.setShortcut(QKeySequence("Ctrl+R"))
+        self.recalculate_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        self.recalculate_action.setToolTip(wrap_tooltip(
+            "Rebuild the PSD matrix from the loaded event file with the current "
+            "histogram settings. Available when they differ from the displayed matrix."
+        ))
+        self.recalculate_action.setEnabled(False)
+        self.recalculate_action.triggered.connect(self._recalculate)
+        self.analysis_menu.addSeparator()
         self.fit_action = self._menu_control(
             self.analysis_menu, "Fit double Gaussian", self.plot.fom_widget.fit_button,
         )
@@ -291,6 +319,7 @@ class PsdReadbackDialog(QDialog):
             self._set_current_file(self._source_info.path)
         self._last_accumulator = accumulator
         self._processed_events = processed
+        self._declined_settings = None
         stats = accumulator.statistics
         self.status.setText(
             f"Loaded {processed:,} events from {source}. Accepted {stats.accepted:,}; "
@@ -331,6 +360,107 @@ class PsdReadbackDialog(QDialog):
         ):
             control.setEnabled(not busy)
         self._update_report_action()
+        self._update_recalculate_action()
+
+    def _histogram_controls(self) -> tuple[QAbstractSpinBox, ...]:
+        return (
+            self.energy_bins,
+            self.ratio_bins,
+            self.energy_shift,
+            self.ratio_min,
+            self.ratio_max,
+        )
+
+    def _requested_settings(self) -> HistogramSettings:
+        return (
+            self.energy_bins.value(),
+            self.ratio_bins.value(),
+            self.energy_shift.value(),
+            (self.ratio_min.value(), self.ratio_max.value()),
+        )
+
+    def _displayed_settings(self) -> HistogramSettings | None:
+        accumulator = self._last_accumulator
+        if accumulator is None:
+            return None
+        return (
+            accumulator.energy_bins,
+            accumulator.ratio_bins,
+            accumulator.energy_right_shift,
+            accumulator.ratio_range,
+        )
+
+    def _settings_pending(self) -> bool:
+        """The histogram settings differ from those of the displayed matrix."""
+        displayed = self._displayed_settings()
+        return displayed is not None and displayed != self._requested_settings()
+
+    def _update_recalculate_action(self) -> None:
+        self.recalculate_action.setEnabled(
+            self._thread is None and self._source_info is not None and self._settings_pending()
+        )
+
+    def _histogram_edit_finished(self, control: QAbstractSpinBox) -> None:
+        # Leaving a field moves the focus first; wait until it has moved so a
+        # step to the next histogram field does not interrupt a multi-field edit.
+        QTimer.singleShot(0, partial(self._offer_recalculation, control))
+
+    def _offer_recalculation(self, control: QAbstractSpinBox) -> None:
+        """Ask once per change whether to rebuild the matrix with the new settings."""
+        if (
+            self._asking_recalculation
+            or not self.isVisible()
+            or not self.isActiveWindow()
+            or QApplication.activePopupWidget() is not None
+            or not self.recalculate_action.isEnabled()
+        ):
+            return
+        focus = QApplication.focusWidget()
+        moving_on = (
+            focus is not None
+            and focus is not control
+            and not control.isAncestorOf(focus)
+            and self.histogram_settings.isAncestorOf(focus)
+        )
+        requested = self._requested_settings()
+        if moving_on or requested == self._declined_settings:
+            return
+        if self.ratio_min.value() >= self.ratio_max.value():
+            self.status.setText(
+                "Ratio minimum must be below ratio maximum before the PSD matrix "
+                "can be recalculated."
+            )
+            return
+        info = self._source_info
+        assert info is not None
+        self._asking_recalculation = True
+        try:
+            answer = QMessageBox.question(
+                self,
+                "Recalculate PSD Matrix?",
+                "The histogram settings no longer match the displayed PSD matrix.\n\n"
+                f"Recalculate it from {info.path.name} now? All {info.total_events:,} "
+                "events are read again and the current FOM fit is cleared.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+        finally:
+            self._asking_recalculation = False
+        if answer == QMessageBox.StandardButton.Yes:
+            self._recalculate()
+            return
+        self._declined_settings = requested
+        self.status.setText(
+            "Histogram settings changed; the plot still shows the previous settings. "
+            "Choose Analysis > Recalculate PSD matrix (Ctrl+R) to apply them."
+        )
+
+    def _recalculate(self) -> None:
+        """Rebuild the matrix from the loaded file with the current settings."""
+        info = self._source_info
+        if info is None or self._thread is not None:
+            return
+        self.open_path(info.path)
 
     def _set_current_file(self, path: Path | None) -> None:
         self.setWindowFilePath(str(path) if path is not None else "")

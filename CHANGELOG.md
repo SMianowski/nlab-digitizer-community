@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **PSD readback recalculation** — changing a histogram setting (energy bins, ratio
+  bins, energy shift, ratio range) in **Tools → PSD Event Readback** now asks whether
+  to rebuild the matrix from the loaded file; before, new settings only applied to
+  the next file loaded. It asks once you press Enter or leave the settings, not while
+  moving between them. **Yes** keeps the PSD cut and energy ROI and clears the FOM
+  fit; after **No**, **Analysis → Recalculate PSD matrix** (Ctrl+R) applies them later.
+
+### Fixed
+
+- **Enter in PSD readback fields** — pressing Enter in a histogram setting no longer
+  also starts a FOM fit through the dialog's default button.
+
 ## [0.9.4] — 2026-11-23
 
 General Settings lists its groups as categories and can add the start time to
