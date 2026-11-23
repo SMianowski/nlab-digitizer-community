@@ -114,6 +114,13 @@ FORM_TOPICS: dict[str, tuple[str, dict[str, str]]] = {
 # Attributes, rather than object names, identify programmatically created controls.
 # Include future optional controls without requiring a feature-branch merge.
 CLASS_TOPICS: dict[str, tuple[str, dict[str, str]]] = {
+    "PsdEnergyFomDialog": ("psd-energy-fom", {
+        "slices_spin": "psd-energy-fom", "spacing_combo": "psd-energy-fom",
+        "minimum_spin": "psd-energy-fom", "fit_button": "psd-energy-fom",
+        "plots": "psd-energy-fom", "table": "psd-energy-fom",
+        "copy_button": "export", "save_button": "export",
+        "best_button": "psd-energy-fom",
+    }),
     "WaveformMcaTransferDialog": ("waveform-mca-transfer", {
         "target_combo": "waveform-mca-transfer", "enable_cc": "waveform-mca-transfer",
         "table": "waveform-mca-transfer", "apply_button": "waveform-mca-transfer",

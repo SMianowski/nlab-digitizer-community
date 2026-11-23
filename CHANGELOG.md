@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-11-23
+
+General Settings lists its groups as categories and can add the start time to
+recording names you choose. The Scope plot follows a restored frame length,
+formulas inside Help sentences render, long tooltips wrap, panel undock buttons
+are full size, and External modules use nlab-modbus 0.3.0. The PSD readback asks
+to recalculate after histogram changes and fits FOM versus energy, and the PSD
+help cites the literature its methods follow.
+
 ### Added
 
 - **PSD readback recalculation** — changing a histogram setting (energy bins, ratio
@@ -17,21 +26,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the next file loaded. It asks once you press Enter or leave the settings, not while
   moving between them. **Yes** keeps the PSD cut and energy ROI and clears the FOM
   fit; after **No**, **Analysis → Recalculate PSD matrix** (Ctrl+R) applies them later.
-
-### Fixed
-
-- **Enter in PSD readback fields** — pressing Enter in a histogram setting no longer
-  also starts a FOM fit through the dialog's default button.
-
-## [0.9.4] — 2026-11-23
-
-General Settings lists its groups as categories and can add the start time to
-recording names you choose. The Scope plot follows a restored frame length,
-formulas inside Help sentences render, long tooltips wrap, panel undock buttons
-are full size, and External modules use nlab-modbus 0.3.0.
-
-### Added
-
+- **PSD FOM versus energy** — **Analysis → FOM vs energy...** (Ctrl+E) in the PSD
+  readback divides the FOM energy ROI into slices (equal counts by default, or equal
+  width) and fits each one, and the whole ROI, with the FOM panel's current model,
+  windows and seeds. PSD bands move and narrow with energy, so one fit over a wide
+  ROI merges different band positions and understates the separation: on a
+  liquid-scintillator Cs-137 + PuBe capture the whole ROI gave FOM 0.65 with a
+  poor-fit flag, while six slices gave 0.55 to 0.75 with good fits. Plots show FOM
+  and both band positions (±FWHM/2) against energy; the table can be copied or saved
+  as CSV with its settings, and the report gains a FOM-versus-energy page and
+  `fom_vs_energy.csv` when slices have been fitted. **Use best slice as ROI** sets
+  the readback's FOM energy ROI to the slice with the highest FOM among fits without
+  warnings and refits the FOM panel there, reproducing that slice's FOM.
+- **PSD literature references** — the help topics on the PSD ratio, charge comparison,
+  zero crossing, the FOM fit, FOM versus energy, waveform reconstruction and the gate
+  search, and the matching analysis modules, now cite the papers their methods follow
+  (for example Brooks 1959 for charge comparison, Winyard et al. 1971 for the FOM,
+  Baker and Cousins 1984 for the Poisson likelihood fit), with DOIs.
 - **Timestamps on chosen file names** — **General Settings → Acquisition files →
   Add the start time to chosen file names** gives Scope DMA, MCA list-mode and
   Current sum recordings with an operator-chosen name the same `_YYYYmmdd_HHMMSS`
@@ -44,6 +55,8 @@ are full size, and External modules use nlab-modbus 0.3.0.
 
 ### Fixed
 
+- **Enter in PSD readback fields** — pressing Enter in a histogram setting no longer
+  also starts a FOM fit through the dialog's default button.
 - **Scope plot matches the frame length after a restore** — restoring the remembered
   device configuration at startup, or **Load Settings**, updated the Scope **Frame**
   control but left the plot on the earlier time range (for example 0–2 µs for a

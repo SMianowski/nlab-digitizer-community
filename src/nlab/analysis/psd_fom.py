@@ -1,4 +1,29 @@
-"""Joint and independent Gaussian figure-of-merit fits for PSD projections."""
+"""Joint and independent Gaussian figure-of-merit fits for PSD projections.
+
+The figure of merit is the centroid separation over the summed FWHM of the
+two populations (Winyard et al. 1971). Fits minimise the Poisson likelihood
+chi-square of Baker and Cousins (1984), whose signed square-root terms are
+the residuals of ``_poisson_deviance_residual``, with lmfit's MINPACK
+Levenberg-Marquardt solver (Marquardt 1963; Madsen et al. 2004; Newville
+et al. 2014).
+
+References
+----------
+Winyard, R. A., Lutkin, J. E., McBeth, G. W. (1971). Pulse shape
+    discrimination in inorganic and organic scintillators. I. Nucl. Instrum.
+    Methods 95, 141-153. doi:10.1016/0029-554X(71)90054-1
+Baker, S., Cousins, R. D. (1984). Clarification of the use of chi-square
+    and likelihood functions in fits to histograms. Nucl. Instrum. Methods
+    Phys. Res. 221, 437-442. doi:10.1016/0167-5087(84)90016-4
+Marquardt, D. W. (1963). An algorithm for least-squares estimation of
+    nonlinear parameters. J. Soc. Ind. Appl. Math. 11, 431-441.
+    doi:10.1137/0111030
+Madsen, K., Nielsen, H. B., Tingleff, O. (2004). Methods for Non-Linear
+    Least Squares Problems. IMM, Technical University of Denmark.
+Newville, M., Stensitzki, T., Allen, D. B., Ingargiola, A. (2014).
+    LMFIT: Non-linear least-square minimization and curve-fitting for
+    Python. Zenodo. doi:10.5281/zenodo.11813
+"""
 
 from __future__ import annotations
 
@@ -58,6 +83,42 @@ class PsdFomFit:
     def reduced_chi_square(self) -> float:
         """Compatibility alias for callers written before Poisson weighting."""
         return self.reduced_deviance
+
+
+@dataclass(frozen=True)
+class PsdFitSettings:
+    """A FOM fit as configured in the FOM panel, applicable to any projection.
+
+    ``roi`` bounds the double-Gaussian fit; ``peak_rois`` are the two windows
+    of the separate-Gaussians mode.
+    """
+
+    mode: Literal["double", "separate"]
+    roi: tuple[float, float]
+    centroid_seeds: tuple[float, float]
+    peak_rois: tuple[tuple[float, float], tuple[float, float]] | None = None
+    use_background: bool = True
+
+
+def fit_psd_projection(
+    ratio: np.ndarray,
+    counts: np.ndarray,
+    settings: PsdFitSettings,
+    *,
+    max_nfev: int = 10_000,
+) -> PsdFomFit:
+    """Fit one ratio projection with the configured model."""
+    if settings.mode == "separate":
+        if settings.peak_rois is None:
+            raise ValueError("separate Gaussian fits need two peak windows")
+        return fit_psd_fom_separate_lm(
+            ratio, counts, rois=settings.peak_rois, centroid_seeds=settings.centroid_seeds,
+            max_nfev=max_nfev, use_background=settings.use_background,
+        )
+    return fit_psd_fom_lm(
+        ratio, counts, roi=settings.roi, centroid_seeds=settings.centroid_seeds,
+        max_nfev=max_nfev, use_background=settings.use_background,
+    )
 
 
 def fit_psd_fom_lm(
@@ -181,6 +242,7 @@ def fit_psd_fom_lm(
     )
     fwhms = (_FWHM_FACTOR * sigmas[0], _FWHM_FACTOR * sigmas[1])
     denominator = fwhms[0] + fwhms[1]
+    # Winyard et al. (1971): separation over the sum of the two FWHMs.
     fom = abs(centroids[1] - centroids[0]) / denominator
     degrees_of_freedom = max(len(y) - len(result.var_names), 1)
     reduced_deviance = (
@@ -478,7 +540,12 @@ def _poisson_deviance_residual(
     observed: np.ndarray,
     expected: np.ndarray,
 ) -> np.ndarray:
-    """Return signed square-root Poisson-deviance residuals."""
+    """Return signed square-root Poisson-deviance residuals.
+
+    Their squares sum to the Poisson likelihood chi-square of Baker and
+    Cousins (1984), 2 * sum(m - y + y * ln(y / m)), which stays unbiased for
+    sparse and empty bins where Neyman's or Pearson's chi-square is not.
+    """
     safe_expected = np.maximum(np.asarray(expected, dtype=np.float64), 1.0e-12)
     observed_values = np.asarray(observed, dtype=np.float64)
     terms = safe_expected - observed_values

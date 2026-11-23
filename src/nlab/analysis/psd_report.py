@@ -34,6 +34,12 @@ from reportlab.platypus import (
 )
 
 from nlab import __version__
+from nlab.analysis.psd_energy_fom import (
+    PsdEnergyFomResult,
+    PsdEnergySlice,
+    energy_fom_settings,
+    write_energy_fom_csv,
+)
 from nlab.analysis.psd_fom import PsdFomFit
 
 _EWT_URL = "https://ewt.tech"
@@ -58,6 +64,8 @@ class PsdReportRequest:
     settings: Mapping[str, object] = field(default_factory=dict)
     digitizer_info: Mapping[str, object] = field(default_factory=dict)
     statistics: Mapping[str, object] = field(default_factory=dict)
+    # Optional FOM-versus-energy slices; they state their own ROI and fit settings.
+    energy_fom: PsdEnergyFomResult | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +79,7 @@ class PsdReportBundle:
     fom_projection_csv: Path
     settings_csv: Path
     metadata_json: Path
+    fom_vs_energy_csv: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -104,8 +113,13 @@ def export_psd_report(request: PsdReportRequest, destination: Path) -> PsdReport
         fom_projection_csv=report_directory / "fom_projection_and_fit.csv",
         settings_csv=report_directory / "report_settings.csv",
         metadata_json=report_directory / "report_metadata.json",
+        fom_vs_energy_csv=(
+            report_directory / "fom_vs_energy.csv" if request.energy_fom is not None else None
+        ),
     )
     created_utc = datetime.now(UTC).isoformat(timespec="seconds")
+    if request.energy_fom is not None and bundle.fom_vs_energy_csv is not None:
+        write_energy_fom_csv(bundle.fom_vs_energy_csv, request.energy_fom)
     _write_matrix_csv(bundle.psd_matrix_csv, matrix, projection)
     _write_spectra_csv(bundle.separated_spectra_csv, projection)
     _write_fom_csv(bundle.fom_projection_csv, projection, request.fit)
@@ -425,12 +439,16 @@ def _write_metadata(
             "input_bins": len(fit.x),
             "input_ratio_range": [float(fit.x[0]), float(fit.x[-1])],
         },
+        "energy_resolved_fom": _energy_fom_metadata(request.energy_fom),
         "files": {
             "pdf": bundle.pdf.name,
             "psd_matrix_csv": bundle.psd_matrix_csv.name,
             "separated_spectra_csv": bundle.separated_spectra_csv.name,
             "fom_projection_csv": bundle.fom_projection_csv.name,
             "settings_csv": bundle.settings_csv.name,
+            "fom_vs_energy_csv": (
+                bundle.fom_vs_energy_csv.name if bundle.fom_vs_energy_csv is not None else None
+            ),
         },
     }
     bundle.metadata_json.write_text(
@@ -509,6 +527,10 @@ def _write_pdf(
     story.append(Paragraph("Fitting method and FOM", styles["Heading3"]))
     story.extend(_fit_method_explanation(styles, request.fit))
     story.append(PageBreak())
+
+    if request.energy_fom is not None:
+        story.extend(_energy_fom_section(request.energy_fom, styles))
+        story.append(PageBreak())
 
     story.append(Paragraph("Cut-separated energy spectra", styles["Heading1"]))
     story.append(
@@ -736,6 +758,113 @@ def _fit_table(fit: PsdFomFit, styles: Mapping[str, ParagraphStyle]) -> Table:
         TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)])
     )
     return wrapper
+
+
+def _energy_fom_metadata(result: PsdEnergyFomResult | None) -> object:
+    if result is None:
+        return None
+
+    def entry(item: PsdEnergySlice) -> dict[str, object]:
+        fit = item.fit
+        return {
+            "energy_range": [item.low, item.high],
+            "events": item.events,
+            "fitted": fit is not None,
+            "trusted": item.trusted,
+            "status": item.status,
+            "centroids": list(fit.centroids) if fit is not None else None,
+            "fwhms": list(fit.fwhms) if fit is not None else None,
+            "fom": fit.fom if fit is not None else None,
+            "reduced_poisson_deviance": fit.reduced_deviance if fit is not None else None,
+        }
+
+    return _json_value({
+        "settings": dict(energy_fom_settings(result)),
+        "slices": [entry(item) for item in result.slices],
+        "whole_roi": entry(result.whole),
+    })
+
+
+def _energy_fom_section(
+    result: PsdEnergyFomResult,
+    styles: Mapping[str, ParagraphStyle],
+) -> list[Any]:
+    section: list[Any] = [
+        Paragraph("PSD FOM versus energy", styles["Heading1"]),
+        Image(_energy_fom_figure(result), width=172 * mm, height=112 * mm),
+        Spacer(1, 3 * mm),
+    ]
+    data: list[list[Any]] = [[
+        "Slice", "Energy range", "Events", "Centroids 1 / 2", "FWHM 1 / 2", "FOM", "Status",
+    ]]
+    labelled = [(str(index), item) for index, item in enumerate(result.slices, start=1)]
+    labelled.append(("Whole ROI", result.whole))
+    for label, item in labelled:
+        fit = item.fit
+        data.append([
+            label,
+            f"{item.low:.6g} to {item.high:.6g}",
+            f"{item.events:,}",
+            f"{fit.centroids[0]:.4g} / {fit.centroids[1]:.4g}" if fit is not None else "",
+            f"{fit.fwhms[0]:.4g} / {fit.fwhms[1]:.4g}" if fit is not None else "",
+            f"{fit.fom:.4g}" if fit is not None else "",
+            Paragraph(_escape(item.status), styles["ReportSmall"]),
+        ])
+    table = Table(
+        data,
+        colWidths=[16 * mm, 34 * mm, 18 * mm, 28 * mm, 28 * mm, 14 * mm, 42 * mm],
+        repeatRows=1,
+    )
+    _apply_table_style(table)
+    section.extend([
+        table,
+        Spacer(1, 3 * mm),
+        Paragraph("Slicing and fit settings", styles["Heading3"]),
+        _key_value_table(energy_fom_settings(result), styles),
+        Spacer(1, 2 * mm),
+        Paragraph(
+            "Each slice is fitted with the same model, windows and seeds as the FOM "
+            "above. PSD bands move and narrow with energy, so one projection over the "
+            "whole ROI merges different band positions and its FOM can be lower than "
+            "that of every slice. Hollow markers are fits flagged as unreliable; "
+            "fom_vs_energy.csv holds the full table.",
+            styles["ReportSmall"],
+        ),
+    ])
+    return section
+
+
+def _energy_fom_figure(result: PsdEnergyFomResult) -> BytesIO:
+    figure = Figure(figsize=(8.0, 5.2), dpi=150, layout="constrained")
+    fom_axis, centroid_axis = figure.subplots(2, 1, sharex=True)
+    fitted = [item for item in result.slices if item.fit is not None]
+    centers = np.array([item.center for item in fitted])
+    half = np.array([(item.high - item.low) / 2 for item in fitted])
+    if fitted:
+        fom = np.array([item.fit.fom for item in fitted if item.fit is not None])
+        trusted = np.array([item.trusted for item in fitted])
+        fom_axis.errorbar(centers, fom, xerr=half, fmt="none", ecolor="#2A9D8F", linewidth=1.0)
+        fom_axis.plot(centers[trusted], fom[trusted], "o", color="#2A9D8F", label="Slice fit")
+        if np.any(~trusted):
+            fom_axis.plot(centers[~trusted], fom[~trusted], "o", markerfacecolor="none",
+                          color="#B54708", label="Flagged fit")
+        for index, color in ((0, "#277DA1"), (1, "#F8961E")):
+            centroids = [item.fit.centroids[index] for item in fitted if item.fit is not None]
+            widths = [item.fit.fwhms[index] / 2 for item in fitted if item.fit is not None]
+            centroid_axis.errorbar(centers, centroids, yerr=widths, fmt="o-", color=color,
+                                   linewidth=1.0, markersize=4, capsize=0,
+                                   label=f"Population {index + 1} (bars: FWHM/2)")
+    if result.whole.fit is not None:
+        fom_axis.axhline(result.whole.fit.fom, color="#2A9D8F", linestyle="--", linewidth=1.0,
+                         label=f"Whole ROI {result.whole.fit.fom:.3g}")
+    fom_axis.set(ylabel="FOM")
+    fom_axis.grid(alpha=0.2)
+    fom_axis.legend(loc="best", fontsize=7)
+    centroid_axis.set(xlabel=f"{result.request.energy_label} (raw)", ylabel="PSD ratio")
+    centroid_axis.grid(alpha=0.2)
+    centroid_axis.legend(loc="best", fontsize=7)
+    centroid_axis.set_xlim(result.energy_roi)
+    return _figure_png(figure)
 
 
 def _metadata_table(

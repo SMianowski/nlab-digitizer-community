@@ -306,7 +306,7 @@ def test_compact_fom_panel_keeps_results_and_fit_warnings(
     fit = fit_psd_fom_lm(ratio, counts, roi=(0.1, 0.9), centroid_seeds=(0.3, 0.7))
     warning_fit = replace(fit, warnings=("Synthetic fit-quality warning",))
     monkeypatch.setattr(
-        "nlab.views.psd_fom_widget.fit_psd_fom_lm", Mock(return_value=warning_fit),
+        "nlab.analysis.psd_fom.fit_psd_fom_lm", Mock(return_value=warning_fit),
     )
     widget.set_projection(ratio, counts)
     assert widget.fit_current_projection() is warning_fit

@@ -7,7 +7,7 @@ from typing import Literal, cast
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QObject, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QRectF, QSignalBlocker, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -180,6 +180,19 @@ class OfflinePsdPlot(QWidget):
         if event_hub is not None:
             event_hub.register(self, self.eventFilter, events=(QEvent.Type.KeyPress,))
         wrap_widget_tooltips(self)
+
+    def set_energy_roi(self, low: float, high: float) -> None:
+        """Show the FOM energy ROI at ``low``..``high`` and project it now.
+
+        Bin-edge bounds select exactly those matrix bins, the same half-open
+        rule PsdAccumulator.ratio_projection uses.
+        """
+        if not self._has_data:
+            raise ValueError("No PSD data are loaded")
+        self.roi_checkbox.setChecked(True)
+        with QSignalBlocker(self.energy_region):
+            self.energy_region.setRegion(sorted((float(low), float(high))))
+        self._render_projections()
 
     def _set_roi_visible(self, visible: bool) -> None:
         self.energy_region.setVisible(visible)

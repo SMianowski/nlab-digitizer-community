@@ -285,7 +285,7 @@ def test_continuous_fit_coalesces_updates_and_stops_when_unchecked(
     ratio, counts = _double_gaussian_projection()
     fit = fit_psd_fom_lm(ratio, counts, roi=(-0.05, 0.65), centroid_seeds=(0.1, 0.5))
     fitter = Mock(return_value=fit)
-    monkeypatch.setattr("nlab.views.psd_fom_widget.fit_psd_fom_lm", fitter)
+    monkeypatch.setattr("nlab.analysis.psd_fom.fit_psd_fom_lm", fitter)
     plot = OfflinePsdPlot()
     qtbot.addWidget(plot)
     widget = plot.fom_widget
@@ -315,7 +315,7 @@ def test_continuous_fit_waits_for_enabled_fit_control(
     ratio, counts = _double_gaussian_projection()
     fit = fit_psd_fom_lm(ratio, counts, roi=(-0.05, 0.65), centroid_seeds=(0.1, 0.5))
     fitter = Mock(return_value=fit)
-    monkeypatch.setattr("nlab.views.psd_fom_widget.fit_psd_fom_lm", fitter)
+    monkeypatch.setattr("nlab.analysis.psd_fom.fit_psd_fom_lm", fitter)
     plot = OfflinePsdPlot()
     qtbot.addWidget(plot)
     widget = plot.fom_widget
@@ -344,7 +344,7 @@ def test_continuous_fit_does_not_retry_invalid_data_until_something_changes(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fitter = Mock(side_effect=ValueError("No resolvable peak"))
-    monkeypatch.setattr("nlab.views.psd_fom_widget.fit_psd_fom_lm", fitter)
+    monkeypatch.setattr("nlab.analysis.psd_fom.fit_psd_fom_lm", fitter)
     plot = OfflinePsdPlot()
     qtbot.addWidget(plot)
     widget = plot.fom_widget
@@ -431,7 +431,7 @@ def test_offset_checkbox_invalidates_fit_and_controls_continuous_model(
     assert widget.last_fit is None and not widget.copy_button.isEnabled()
     function_name = "fit_psd_fom_lm" if mode == "double" else "fit_psd_fom_separate_lm"
     fitter = Mock(side_effect=ValueError("Test routing only"))
-    monkeypatch.setattr(f"nlab.views.psd_fom_widget.{function_name}", fitter)
+    monkeypatch.setattr(f"nlab.analysis.psd_fom.{function_name}", fitter)
     widget.continuous_checkbox.setChecked(True)
     assert widget._continuous_timer.isActive()
     # Exercise model routing without depending on GUI timer scheduling.

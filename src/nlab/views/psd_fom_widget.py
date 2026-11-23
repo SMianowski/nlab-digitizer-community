@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from nlab.analysis.psd_fom import PsdFomFit, fit_psd_fom_lm, fit_psd_fom_separate_lm
+from nlab.analysis.psd_fom import PsdFitSettings, PsdFomFit, fit_psd_projection
 from nlab.views import theme
 from nlab.views.tooltips import wrap_widget_tooltips
 
@@ -287,32 +287,33 @@ class PsdFomWidget(QGroupBox):
         self.status_label.setText("No fit yet.")
         self.fit_changed.emit(None)
 
+    def fit_settings(self) -> PsdFitSettings:
+        """The fit model, windows and seeds currently set in this panel."""
+        region = self.fit_region.getRegion()
+        values = [item.getRegion() for item in self.peak_regions]
+        separate = self.mode_combo.currentData() == "separate"
+        return PsdFitSettings(
+            mode="separate" if separate else "double",
+            roi=(float(region[0]), float(region[1])),
+            centroid_seeds=(
+                float(self.centroid_lines[0].value()),
+                float(self.centroid_lines[1].value()),
+            ),
+            peak_rois=(
+                (float(values[0][0]), float(values[0][1])),
+                (float(values[1][0]), float(values[1][1])),
+            ),
+            use_background=self.background_checkbox.isChecked(),
+        )
+
     def fit_current_projection(self, *, _continuous: bool = False) -> PsdFomFit | None:
         """Fit the current projection snapshot and update the result panel."""
         self._fit_dirty = False
         try:
-            region = self.fit_region.getRegion()
-            centroid_seeds = (
-                float(self.centroid_lines[0].value()),
-                float(self.centroid_lines[1].value()),
-            )
             budget = 400 if _continuous else 10_000
-            if self.mode_combo.currentData() == "separate":
-                values = [item.getRegion() for item in self.peak_regions]
-                rois = ((float(values[0][0]), float(values[0][1])),
-                        (float(values[1][0]), float(values[1][1])))
-                fit = fit_psd_fom_separate_lm(
-                    self._ratio, self._counts,
-                    rois=(rois[0], rois[1]), centroid_seeds=centroid_seeds, max_nfev=budget,
-                    use_background=self.background_checkbox.isChecked(),
-                )
-            else:
-                fit = fit_psd_fom_lm(
-                    self._ratio, self._counts,
-                    roi=(float(region[0]), float(region[1])),
-                    centroid_seeds=centroid_seeds, max_nfev=budget,
-                    use_background=self.background_checkbox.isChecked(),
-                )
+            fit = fit_psd_projection(
+                self._ratio, self._counts, self.fit_settings(), max_nfev=budget,
+            )
         except (RuntimeError, TypeError, ValueError) as error:
             self.clear_fit()
             self._fit_dirty = False

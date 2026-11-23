@@ -32,11 +32,13 @@ from PySide6.QtWidgets import (
 from nlab import settings_keys
 from nlab.analysis.capture_metadata import capture_digitizer_info
 from nlab.analysis.psd import PsdAccumulator
+from nlab.analysis.psd_energy_fom import PsdEnergyFomRequest
 from nlab.analysis.psd_file import PsdEventFileInfo, inspect_psd_event_file
 from nlab.help.context import HelpContext
 from nlab.views.help_dialog import HelpDialog
 from nlab.views.numeric_controls import keep_enter_in_fields
 from nlab.views.offline_psd_plot import OfflinePsdPlot
+from nlab.views.psd_energy_fom_dialog import PsdEnergyFomDialog
 from nlab.views.tooltips import wrap_tooltip, wrap_widget_tooltips
 from nlab.views.window_flags import make_tool_window
 from nlab.workers.psd_file_worker import PsdFileWorker
@@ -65,6 +67,7 @@ class PsdReadbackDialog(QDialog):
         self._processed_events = 0
         self._menu_control_actions: dict[QAbstractButton, QAction] = {}
         self._help_dialog: HelpDialog | None = None
+        self._energy_fom_dialog: PsdEnergyFomDialog | None = None
         # Settings the user chose not to apply yet; asked again only after a change.
         self._declined_settings: HistogramSettings | None = None
         self._asking_recalculation = False
@@ -195,6 +198,15 @@ class PsdReadbackDialog(QDialog):
         self.recalculate_action.setEnabled(False)
         self.recalculate_action.triggered.connect(self._recalculate)
         self.analysis_menu.addSeparator()
+        self.energy_fom_action = self.analysis_menu.addAction("FOM vs energy...")
+        self.energy_fom_action.setShortcut(QKeySequence("Ctrl+E"))
+        self.energy_fom_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        self.energy_fom_action.setToolTip(wrap_tooltip(
+            "Fit the FOM in slices of the energy ROI with the current fit settings, "
+            "to see how separation changes with energy."
+        ))
+        self.energy_fom_action.setEnabled(False)
+        self.energy_fom_action.triggered.connect(self._open_energy_fom)
         self.fit_action = self._menu_control(
             self.analysis_menu, "Fit double Gaussian", self.plot.fom_widget.fit_button,
         )
@@ -320,6 +332,10 @@ class PsdReadbackDialog(QDialog):
         self._last_accumulator = accumulator
         self._processed_events = processed
         self._declined_settings = None
+        if self._energy_fom_dialog is not None:
+            self._energy_fom_dialog.invalidate(
+                "The PSD matrix was rebuilt. Press Fit slices to fit the new matrix."
+            )
         stats = accumulator.statistics
         self.status.setText(
             f"Loaded {processed:,} events from {source}. Accepted {stats.accepted:,}; "
@@ -361,6 +377,7 @@ class PsdReadbackDialog(QDialog):
             control.setEnabled(not busy)
         self._update_report_action()
         self._update_recalculate_action()
+        self.energy_fom_action.setEnabled(not busy and self._last_accumulator is not None)
 
     def _histogram_controls(self) -> tuple[QAbstractSpinBox, ...]:
         return (
@@ -515,6 +532,11 @@ class PsdReadbackDialog(QDialog):
             matrix_scale=state.matrix_scale,
             energy_log_y=state.energy_log_y,
             fit=fit,
+            energy_fom=(
+                self._energy_fom_dialog.last_result
+                if self._energy_fom_dialog is not None
+                else None
+            ),
             settings={
                 "energy right shift": accumulator.energy_right_shift,
                 "PSD ratio definition": "(Qlong - Qshort) / Qlong",
@@ -554,6 +576,43 @@ class PsdReadbackDialog(QDialog):
             f"Report and data files were saved to:\n{bundle.directory}",
         )
 
+    def _energy_fom_request(self) -> PsdEnergyFomRequest:
+        state = self.plot.report_state()
+        return PsdEnergyFomRequest(
+            matrix=state.matrix,
+            energy_range=state.energy_range,
+            ratio_range=state.ratio_range,
+            energy_roi=state.energy_roi,
+            settings=self.plot.fom_widget.fit_settings(),
+            energy_label=state.energy_label,
+        )
+
+    def _open_energy_fom(self) -> None:
+        if self._energy_fom_dialog is None:
+            self._energy_fom_dialog = PsdEnergyFomDialog(self._energy_fom_request, self)
+            self._energy_fom_dialog.energy_roi_requested.connect(self._use_energy_slice)
+        dialog = self._energy_fom_dialog
+        info = self._source_info
+        if info is not None:
+            dialog.default_csv_path = info.path.with_name(f"{info.path.stem}_fom_vs_energy.csv")
+        dialog.refit()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _use_energy_slice(self, low: float, high: float) -> None:
+        """Make a FOM-vs-energy slice the FOM energy ROI and refit the FOM panel there."""
+        if self._thread is not None or self._last_accumulator is None:
+            return
+        self.plot.set_energy_roi(low, high)
+        fit = self.plot.fom_widget.fit_current_projection()
+        outcome = (
+            f"FOM {fit.fom:.4g}" if fit is not None else "the FOM fit is unavailable there"
+        )
+        self.status.setText(
+            f"FOM energy ROI set to the best slice, {low:.6g}-{high:.6g}: {outcome}."
+        )
+
     def show_workspace(self) -> None:
         self.show()
         self.raise_()
@@ -564,6 +623,8 @@ class PsdReadbackDialog(QDialog):
         self.close()
 
     def _stop_sync(self) -> None:
+        if self._energy_fom_dialog is not None:
+            self._energy_fom_dialog.close()
         if self._worker is not None:
             self._worker.stop()
         if self._thread is not None and self._thread.isRunning() and not self._thread.wait(5_000):

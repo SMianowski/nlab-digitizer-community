@@ -1,4 +1,28 @@
-"""Offline PSD reconstruction from stored pulse waveforms."""
+"""Offline PSD reconstruction from stored pulse waveforms.
+
+Each pulse is baseline-subtracted (median or mean of a pre-pulse window) and
+summed over a short and a long gate; the PSD ratio is the tail fraction
+(Qlong - Qshort) / Qlong. This is digital charge comparison (Moszyński et
+al. 1992). Kaschuck and Esposito (2005) apply digital PSD to organic
+scintillators, Söderström et al. (2008) compare charge-comparison and
+zero-crossover algorithms on sampled liquid-scintillator pulses, and
+Nakhostin (2017) covers the underlying signal processing.
+
+References
+----------
+Moszyński, M., Bizard, G., Costa, G. J., et al. (1992). Study of n-gamma
+    discrimination by digital charge comparison method for a large volume
+    liquid scintillator. Nucl. Instrum. Methods Phys. Res. A 317, 262-272.
+    doi:10.1016/0168-9002(92)90617-D
+Kaschuck, Y., Esposito, B. (2005). Neutron/gamma-ray digital pulse shape
+    discrimination with organic scintillators. Nucl. Instrum. Methods Phys.
+    Res. A 551, 420-428. doi:10.1016/j.nima.2005.05.071
+Söderström, P.-A., Nyberg, J., Wolters, R. (2008). Digital pulse-shape
+    discrimination of fast neutrons and gamma rays. Nucl. Instrum. Methods
+    Phys. Res. A 594, 79-89. doi:10.1016/j.nima.2008.06.004
+Nakhostin, M. (2017). Signal Processing for Radiation Detectors. Wiley.
+    doi:10.1002/9781119410225
+"""
 
 from __future__ import annotations
 

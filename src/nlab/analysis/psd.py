@@ -12,6 +12,23 @@ For IIO records the mapping Qshort=charge_energy and
 Qtotal=trapezoid_energy is source-derived and unit-tested but has not yet
 been confirmed against a labelled live source.  The GUI consequently labels
 the two populations "below cut" and "above cut", not neutron/gamma.
+
+Comparing the charge in a short (prompt) gate with the total charge is the
+charge-comparison method of Brooks (1959); Moszyński et al. (1992) describe
+its digital form for a large liquid scintillator, and Knoll (2010, ch. 17)
+reviews pulse shape discrimination.
+
+References
+----------
+Brooks, F. D. (1959). A scintillation counter with neutron and gamma-ray
+    discriminators. Nucl. Instrum. Methods 4, 151-163.
+    doi:10.1016/0029-554X(59)90067-9
+Moszyński, M., Bizard, G., Costa, G. J., et al. (1992). Study of n-gamma
+    discrimination by digital charge comparison method for a large volume
+    liquid scintillator. Nucl. Instrum. Methods Phys. Res. A 317, 262-272.
+    doi:10.1016/0168-9002(92)90617-D
+Knoll, G. F. (2010). Radiation Detection and Measurement, 4th ed.
+    Wiley, Hoboken NJ. ISBN 978-0-470-13148-0
 """
 
 from __future__ import annotations

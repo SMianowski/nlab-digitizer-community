@@ -413,6 +413,12 @@ Stop acquisition before changing the measurement. Offline integration and the
 hardware estimator are separate algorithms; transferring gates does not qualify
 their equivalence.
 
+**References** — Charge comparison and its comparison with zero crossing.
+
+- Brooks, F. D. (1959). A scintillation counter with neutron and gamma-ray discriminators. *Nucl. Instrum. Methods* 4, 151–163. doi:10.1016/0029-554X(59)90067-9
+- Moszyński, M., Bizard, G., Costa, G. J., et al. (1992). Study of n-γ discrimination by digital charge comparison method for a large volume liquid scintillator. *Nucl. Instrum. Methods Phys. Res. A* 317, 262–272. doi:10.1016/0168-9002(92)90617-D
+- Szczęśniak, T., Grodzicka, M., Moszyński, M., et al. (2014). Digital neutron-gamma discrimination methods: charge comparison versus zero-crossing. *IEEE NSS/MIC 2014*, 1–4. doi:10.1109/NSSMIC.2014.7431222
+
 ## MCA — PSD zero crossing {#mca-zerocross}
 
 This block enables hardware zero-crossing analysis. **Mode** selects hardware
@@ -424,6 +430,12 @@ the application does not infer a particle identity from the mode number.
 Zero crossing produces timing information for a separate analysis path. It
 does not replace the short-charge estimate needed by the live charge-comparison
 PSD ratio. Stop list-mode DMA before changing either hardware block.
+
+**References** — Zero-crossing pulse shape discrimination.
+
+- Alexander, T. K., Goulding, F. S. (1961). An amplitude-insensitive system that distinguishes pulses of different shapes. *Nucl. Instrum. Methods* 13, 244–246. doi:10.1016/0029-554X(61)90198-7
+- Nakhostin, M., Walker, P. M. (2010). Application of digital zero-crossing technique for neutron–gamma discrimination in liquid organic scintillation detectors. *Nucl. Instrum. Methods Phys. Res. A* 621, 498–501. doi:10.1016/j.nima.2010.06.252
+- Szczęśniak, T., Grodzicka, M., Moszyński, M., et al. (2014). Digital neutron-gamma discrimination methods: charge comparison versus zero-crossing. *IEEE NSS/MIC 2014*, 1–4. doi:10.1109/NSSMIC.2014.7431222
 
 ## MCA — Start, Stop, and Clear Spectrum {#mca-run}
 
@@ -494,6 +506,12 @@ Offline waveform analysis calculates its own charge sums from saved samples;
 event readback uses recorded event fields. These are related workflows, not
 interchangeable settings. Inspect the [energy ROI](#psd-roi), [cut](#psd-cut),
 and [FOM fit](#fom) before interpreting separation as particle discrimination.
+
+**References** — The live ratio is the digital charge-comparison method.
+
+- Brooks, F. D. (1959). A scintillation counter with neutron and gamma-ray discriminators. *Nucl. Instrum. Methods* 4, 151–163. doi:10.1016/0029-554X(59)90067-9
+- Moszyński, M., Bizard, G., Costa, G. J., et al. (1992). Study of n-γ discrimination by digital charge comparison method for a large volume liquid scintillator. *Nucl. Instrum. Methods Phys. Res. A* 317, 262–272. doi:10.1016/0168-9002(92)90617-D
+- Knoll, G. F. (2010). *Radiation Detection and Measurement*, 4th ed., ch. 17. Wiley. ISBN 978-0-470-13148-0
 
 ## PSD — histogram resolution {#psd-bins}
 
@@ -615,6 +633,13 @@ histogram resolution, and sample size all matter.
 Inspect [fit quality](#fom-quality) before accepting the number.
 **Copy table** copies the fit snapshot and diagnostics for comparison.
 
+**References** — FOM definition, Poisson likelihood fit statistic and fit algorithm.
+
+- Winyard, R. A., Lutkin, J. E., McBeth, G. W. (1971). Pulse shape discrimination in inorganic and organic scintillators. I. *Nucl. Instrum. Methods* 95, 141–153. doi:10.1016/0029-554X(71)90054-1
+- Baker, S., Cousins, R. D. (1984). Clarification of the use of chi-square and likelihood functions in fits to histograms. *Nucl. Instrum. Methods Phys. Res.* 221, 437–442. doi:10.1016/0167-5087(84)90016-4
+- Marquardt, D. W. (1963). An algorithm for least-squares estimation of nonlinear parameters. *J. Soc. Ind. Appl. Math.* 11, 431–441. doi:10.1137/0111030
+- Newville, M., Stensitzki, T., Allen, D. B., Ingargiola, A. (2014). LMFIT: Non-linear least-square minimization and curve-fitting for Python. Zenodo. doi:10.5281/zenodo.11813
+
 ## PSD — constant count offset y0 {#fom-offset}
 
 **Use y0 offset** is checked by default, preserving the original fit model.
@@ -703,6 +728,13 @@ The operation reads the capture without changing the file or live digitizer
 settings. Cancel requests worker termination; wait for completion before starting
 another job. Use the frame preview to check representative pulses, not just one
 especially clean event.
+
+**References** — Digital charge comparison on sampled pulses.
+
+- Moszyński, M., Bizard, G., Costa, G. J., et al. (1992). Study of n-γ discrimination by digital charge comparison method for a large volume liquid scintillator. *Nucl. Instrum. Methods Phys. Res. A* 317, 262–272. doi:10.1016/0168-9002(92)90617-D
+- Kaschuck, Y., Esposito, B. (2005). Neutron/γ-ray digital pulse shape discrimination with organic scintillators. *Nucl. Instrum. Methods Phys. Res. A* 551, 420–428. doi:10.1016/j.nima.2005.05.071
+- Söderström, P.-A., Nyberg, J., Wolters, R. (2008). Digital pulse-shape discrimination of fast neutrons and γ rays. *Nucl. Instrum. Methods Phys. Res. A* 594, 79–89. doi:10.1016/j.nima.2008.06.004
+- Nakhostin, M. (2017). *Signal Processing for Radiation Detectors*. Wiley. doi:10.1002/9781119410225
 
 ## Waveforms — transfer candidate gates to MCA {#waveform-mca-transfer}
 
@@ -888,6 +920,12 @@ Cancel is checked between fits; poor-quality candidates are rejected.
 The winning gates are reconstructed and refitted on the normal selected dataset.
 Its FOM can differ from the sampled search result. The search does not demonstrate
 out-of-sample performance or a globally optimal detector configuration.
+
+**References** — Other approaches to choosing integration gates.
+
+- Zhou, J., Abdulaziz, A., Altmann, Y., Di Fulvio, A. (2023). Generalized method for the optimization of pulse shape discrimination parameters. *Nucl. Instrum. Methods Phys. Res. A* 1050, 168184. doi:10.1016/j.nima.2023.168184
+- Kaplan, A. D., Blair, B., Glenn, A., Wurtz, R. (2023). Automated integration gate selection for Gaussian mixture model pulse shape discrimination. *Nucl. Instrum. Methods Phys. Res. A* 1055, 168486. doi:10.1016/j.nima.2023.168486
+- Graham, C., Jovanovic, I. (2024). Light output-dependent integration gating for optimized pulse-shape discrimination. *IEEE NSS/MIC/RTSD 2024*. doi:10.1109/NSS/MIC/RTSD57108.2024.10658350
 
 ## Current — monitoring overview {#current}
 
@@ -1121,10 +1159,12 @@ and diagnostics when reporting peak measurements.
 
 The **File** menu contains **Load event file...**, **Cancel loading**,
 **Download report...**, and **Close workbench**. **Analysis** provides
-**Recalculate PSD matrix**, Gaussian fitting and fit-table copy. **View** toggles
+**Recalculate PSD matrix**, **FOM vs energy...**, Gaussian fitting and fit-table
+copy. **View** toggles
 PSD ROI and FOM guides, synchronized with the plot controls; **Help** opens this
 bundled guide. Window-local shortcuts are **Ctrl+O** (load), **Ctrl+R**
-(recalculate), **Ctrl+S** (report), and **Ctrl+W** (close).
+(recalculate), **Ctrl+E** (FOM vs energy), **Ctrl+S** (report), and **Ctrl+W**
+(close).
 
 The histogram settings apply when the matrix is built. After you change them
 (press Enter or leave the settings), the workbench asks whether to rebuild the
@@ -1148,6 +1188,50 @@ excluded counts, fit ROIs, and diagnostics.
 It does not reintegrate waveform samples or rewrite hardware integration gates.
 Use the waveform workbench when testing different offline time gates. Raw values
 require format- and detector-specific interpretation before physical calibration.
+
+## Analysis — PSD FOM versus energy {#psd-energy-fom}
+
+PSD bands move and narrow with energy. A single ratio projection over a wide
+energy ROI merges different band positions: its peaks widen, the Gaussian model
+stops describing them (the fit is flagged), and the FOM understates the
+separation reached at each energy. **Analysis → FOM vs energy...** in the PSD
+event readback divides the current FOM energy ROI into slices and fits each one,
+and the whole ROI for comparison, with the FOM panel's current model, windows,
+seeds and y0 setting.
+
+**Slices** sets how many parts the ROI is divided into. **Equal counts** places
+the boundaries so each slice holds about the same number of events, so a
+falling spectrum does not leave the high-energy slices nearly empty; **Equal
+width** gives slices of equal energy width. Boundaries stay on matrix bin edges.
+Slices with fewer than **Minimum events** are listed but not fitted.
+
+The upper plot shows each slice's FOM, with bars spanning the slice; hollow
+markers are fits flagged as unreliable, and the dashed line is the whole-ROI
+FOM. The lower plot shows both population centroids with bars of ±FWHM/2, so
+band movement and overlap are visible. The table lists every slice with its
+events, centroids, FWHMs, FOM, reduced Poisson deviance and fit status.
+
+**Use best slice as ROI** sets the readback's FOM energy ROI to the slice with
+the highest FOM among fits that converged without warnings (marked with a ring
+in the plot and in bold in the table), shows the ROI, and refits the FOM panel
+there. Slice edges are matrix bin edges, so the panel reproduces that slice's
+FOM; a flagged fit is never chosen, because a poor fit can report an inflated
+FOM. The next **Fit slices** divides the new, narrower ROI.
+
+**Fit slices** refits from the matrix, ROI and fit settings shown at that
+moment; recalculating the matrix clears the result. **Copy table** copies
+tab-separated text, and **Save CSV...** writes the table after `#` lines that
+record the ROI, slicing and fit settings. When slices have been fitted, the
+readback report adds a FOM-versus-energy page and `fom_vs_energy.csv`.
+
+A slice FOM describes that energy range only. Compare slices of similar
+statistics, and do not average slice FOMs into one figure.
+
+**References** — FOM in narrow energy cuts and its energy dependence.
+
+- Grodzicka-Kobylka, M., Szczęśniak, T., Moszyński, M., et al. (2020). Fast neutron and gamma ray pulse shape discrimination in EJ-276 and EJ-276G plastic scintillators. *J. Instrum.* 15, P03030. doi:10.1088/1748-0221/15/03/P03030
+- Sénoville, M., Delaunay, F., Pârlog, M., Achouri, N. L., Orr, N. A. (2020). Neutron-γ discrimination with organic scintillators: intrinsic pulse shape and light yield contributions. *Nucl. Instrum. Methods Phys. Res. A* 971, 164080. doi:10.1016/j.nima.2020.164080
+- Graham, C., Jovanovic, I. (2024). Light output-dependent integration gating for optimized pulse-shape discrimination. *IEEE NSS/MIC/RTSD 2024*. doi:10.1109/NSS/MIC/RTSD57108.2024.10658350
 
 ## Analysis — timing validation {#timing-validation}
 
