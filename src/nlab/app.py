@@ -25,6 +25,7 @@ from nlab.hardware.modbus_devices import ExternalDeviceScan
 from nlab.help.controller import HelpController
 from nlab.session.replay import SessionReplay
 from nlab.ui.ui_main_window import Ui_MainWindow
+from nlab.utils import recording_paths
 from nlab.utils.github_releases import GITHUB_REPOSITORY_URL
 from nlab.views import theme
 from nlab.views.about_dialog import AboutDialog
@@ -44,6 +45,7 @@ from nlab.views.general_settings_dialog import (
 from nlab.views.license_dialog import LicenseDialog
 from nlab.views.numeric_controls import install_numeric_input_policy
 from nlab.views.timing_validation_dialog import TimingValidationDialog
+from nlab.views.tooltips import install_tooltip_wrapping
 
 _ABOUT_TEXT = f"""\
 <b>Nuclear Lab Digitizer — Community Edition</b><br>
@@ -62,6 +64,7 @@ _KEY_SHOW_LOG = settings_keys.DEVELOPER_SHOW_SYSTEM_LOG
 _KEY_DEBUG_MODE = settings_keys.DEVELOPER_DEBUG_MODE
 _KEY_DMA_FOLDER = DMA_FOLDER_KEY
 _KEY_MCA_DMA_OUTPUT_MODE = MCA_DMA_OUTPUT_MODE_KEY
+_KEY_TIMESTAMP_CHOSEN_NAMES = settings_keys.RECORDING_TIMESTAMP_CHOSEN_NAMES
 _KEY_SHOW_ROI = settings_keys.VIEW_SHOW_ROI
 _KEY_DIFFERENTIAL_HISTOGRAM = settings_keys.VIEW_DIFFERENTIAL_HISTOGRAM
 _KEY_LOG_Y = settings_keys.VIEW_LOG_Y
@@ -225,6 +228,7 @@ class MainAppWindow(QMainWindow):
 
     def _setup_ui(self) -> None:
         install_numeric_input_policy()
+        install_tooltip_wrapping()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         self._resize_for_available_screen()
@@ -570,6 +574,7 @@ class MainAppWindow(QMainWindow):
                     McaDmaOutputMode.BINARY.value,
                 )
             ),
+            "timestamp_chosen_names": recording_paths.timestamp_chosen_names(),
             "timing_channel_b_offset_ns": cast(
                 int, QSettings().value(_KEY_TIMING_OFFSET_NS, 0, type=int)
             ),
@@ -605,6 +610,10 @@ class MainAppWindow(QMainWindow):
             )
             mode = McaDmaOutputMode.BINARY
         QSettings().setValue(_KEY_MCA_DMA_OUTPUT_MODE, mode.value)
+        if "timestamp_chosen_names" in settings:
+            QSettings().setValue(
+                _KEY_TIMESTAMP_CHOSEN_NAMES, bool(settings["timestamp_chosen_names"])
+            )
         if "timing_channel_b_offset_ns" in settings:
             try:
                 offset_ns = int(settings["timing_channel_b_offset_ns"])
@@ -663,6 +672,7 @@ class MainAppWindow(QMainWindow):
                         McaDmaOutputMode.BINARY.value,
                     )
                 ),
+                "timestamp_chosen_names": recording_paths.timestamp_chosen_names(),
             }
         )
         return values
@@ -688,6 +698,10 @@ class MainAppWindow(QMainWindow):
             _KEY_MCA_DMA_OUTPUT_MODE,
             str(values.get("mca_dma_output_mode", McaDmaOutputMode.BINARY.value)),
         )
+        if "timestamp_chosen_names" in values:
+            settings.setValue(
+                _KEY_TIMESTAMP_CHOSEN_NAMES, bool(values["timestamp_chosen_names"])
+            )
         self._save_developer_settings()
         self._controller.refresh_dma_output_settings()
 

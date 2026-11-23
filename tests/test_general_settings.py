@@ -7,11 +7,12 @@ from unittest.mock import Mock
 import pytest
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeyEvent
-from PySide6.QtWidgets import QMainWindow, QWidget
+from PySide6.QtWidgets import QGroupBox, QMainWindow, QWidget
 from pytestqt.qtbot import QtBot
 
 from nlab import app as app_module
 from nlab.app import MainAppWindow
+from nlab.help.context import resolve_context
 from nlab.ui.ui_main_window import Ui_MainWindow
 from nlab.ui.ui_mca_view import Ui_MCAView
 from nlab.ui.ui_psu_view import Ui_PSUView
@@ -90,7 +91,133 @@ def test_general_settings_describes_complete_configuration_snapshot(
         "psu_plot_time_range_s": 120,
         "dma_save_folder": "captures",
         "mca_dma_output_mode": "hdf5",
+        "timestamp_chosen_names": False,
     }
+
+
+def test_general_settings_lists_each_group_as_a_category(qtbot: QtBot) -> None:
+    dialog = GeneralSettingsDialog("192.0.2.10", {})
+    qtbot.addWidget(dialog)
+
+    assert dialog.categories == [
+        "Appearance",
+        "Scope display",
+        "Acquisition and monitoring",
+        "Acquisition files",
+        "Configuration persistence",
+    ]
+    assert dialog.pages.count() == len(dialog.categories)
+    # Each page holds exactly the group its category names, with its controls.
+    owners = {
+        "Appearance": dialog.theme_combo,
+        "Scope display": dialog.scope_refresh,
+        "Acquisition and monitoring": dialog.psu_history,
+        "Acquisition files": dialog.mca_output,
+        "Configuration persistence": dialog.auto_configuration,
+    }
+    for row, name in enumerate(dialog.categories):
+        groups = dialog.pages.widget(row).findChildren(QGroupBox)
+        assert [group.title() for group in groups] == [name]
+        assert groups[0].isAncestorOf(owners[name])
+    assert dialog.category_list.currentRow() == 0
+    assert dialog.pages.currentIndex() == 0
+
+
+def test_choosing_a_category_shows_its_page(qtbot: QtBot) -> None:
+    dialog = GeneralSettingsDialog("192.0.2.10", {})
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    dialog.category_list.setCurrentRow(3)
+    assert dialog.pages.currentIndex() == 3
+    assert dialog.mca_output.isVisible()
+    assert not dialog.theme_combo.isVisible()
+
+    dialog.show_category("Scope display")
+    assert dialog.category_list.currentRow() == 1
+    assert dialog.scope_refresh.isVisible()
+    with pytest.raises(ValueError, match="no settings category"):
+        dialog.show_category("Missing")
+    assert dialog.category_list.currentRow() == 1
+
+
+def test_general_settings_returns_edits_from_every_page(qtbot: QtBot) -> None:
+    dialog = GeneralSettingsDialog("192.0.2.10", {})
+    qtbot.addWidget(dialog)
+
+    dialog.show_category("Scope display")
+    dialog.scope_refresh.setValue(25)
+    dialog.show_category("Acquisition files")
+    dialog.mca_output.setCurrentIndex(dialog.mca_output.findData("root"))
+    dialog.show_category("Appearance")
+
+    # OK applies the pages that are no longer shown, not only the current one.
+    assert dialog.settings["scope_refresh_rate_hz"] == 25
+    assert dialog.settings["mca_dma_output_mode"] == "root"
+
+
+def test_category_list_fits_its_longest_name(qtbot: QtBot) -> None:
+    dialog = GeneralSettingsDialog("192.0.2.10", {})
+    qtbot.addWidget(dialog)
+    categories = dialog.category_list
+    longest = max(
+        categories.fontMetrics().horizontalAdvance(name) for name in dialog.categories
+    )
+
+    assert categories.minimumWidth() == categories.maximumWidth()
+    assert longest < categories.width() < longest + 64
+    assert resolve_context(categories).topic == "settings"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_timestamp_option_is_on_the_acquisition_files_page(
+    qtbot: QtBot, enabled: bool,
+) -> None:
+    dialog = GeneralSettingsDialog("192.0.2.10", {"timestamp_chosen_names": enabled})
+    qtbot.addWidget(dialog)
+
+    files_page = dialog.pages.widget(dialog.categories.index("Acquisition files"))
+    assert files_page.isAncestorOf(dialog.timestamp_chosen_names)
+    assert dialog.timestamp_chosen_names.isChecked() is enabled
+    dialog.timestamp_chosen_names.setChecked(not enabled)
+    assert dialog.settings["timestamp_chosen_names"] is (not enabled)
+    assert resolve_context(dialog.timestamp_chosen_names).topic == "export"
+
+
+def test_saved_configuration_carries_the_timestamp_option(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    timestamp_chosen_names: dict[str, bool],
+) -> None:
+    stored: dict[str, object] = {}
+
+    class FakeSettings:
+        def value(self, key: str, default: object = None, **_options: object) -> object:
+            return stored.get(key, default)
+
+        def setValue(self, key: str, value: object) -> None:  # noqa: N802
+            stored[key] = value
+
+    owner = QMainWindow()
+    qtbot.addWidget(owner)
+    ui = Ui_MainWindow()
+    ui.setupUi(owner)
+    window = SimpleNamespace(
+        ui=ui,
+        _controller=SimpleNamespace(refresh_dma_output_settings=Mock()),
+        _save_developer_settings=Mock(),
+        _apply_view_state=Mock(),
+    )
+    monkeypatch.setattr(app_module, "QSettings", FakeSettings)
+
+    timestamp_chosen_names["enabled"] = True
+    assert MainAppWindow.configuration_settings(window)["timestamp_chosen_names"] is True
+    MainAppWindow.apply_configuration_settings(window, {"timestamp_chosen_names": True})
+    assert stored["dma/timestamp_chosen_names"] is True
+    # Older files without the key leave the current choice alone.
+    MainAppWindow.apply_configuration_settings(window, {"log_y": True})
+    assert stored["dma/timestamp_chosen_names"] is True
 
 
 def test_mca_histogram_controls_are_in_view_menu(qtbot: QtBot) -> None:
@@ -159,6 +286,7 @@ def test_app_applies_general_settings_to_controllers_and_global_options(
         "psu_plot_time_range_s": 180,
         "dma_save_folder": "captures",
         "mca_dma_output_mode": "root",
+        "timestamp_chosen_names": True,
     }
 
     MainAppWindow._apply_general_settings(window, values)
@@ -167,6 +295,7 @@ def test_app_applies_general_settings_to_controllers_and_global_options(
     controller.refresh_dma_output_settings.assert_called_once_with()
     assert stored["dma/save_folder"] == "captures"
     assert stored["dma/mca_output_mode"] == "root"
+    assert stored["dma/timestamp_chosen_names"] is True
     save_preferences.assert_called_once_with()
 
 

@@ -68,6 +68,21 @@ def isolated_waveform_drawing(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     return store
 
 
+@pytest.fixture(autouse=True)
+def timestamp_chosen_names(monkeypatch: pytest.MonkeyPatch) -> dict[str, bool]:
+    """Keep "add the start time to chosen file names" off unless a test turns it on.
+
+    The option lives in the user's QSettings; with it checked while using the
+    application, every test that records under a chosen name would see a
+    timestamped name. Set ``["enabled"] = True`` to exercise it.
+    """
+    from nlab.utils import recording_paths
+
+    state = {"enabled": False}
+    monkeypatch.setattr(recording_paths, "timestamp_chosen_names", lambda: state["enabled"])
+    return state
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo[None],

@@ -149,6 +149,7 @@ CLASS_TOPICS: dict[str, tuple[str, dict[str, str]]] = {
         "scope_refresh": "refresh", "mca_refresh": "refresh", "psu_refresh": "refresh",
         "psu_history": "display", "dma_folder": "export", "mca_output": "mca-dma",
         "auto_configuration": "settings", "snapshot_path": "settings",
+        "category_list": "settings", "timestamp_chosen_names": "export",
     }),
     "CoincidenceController": ("coincidence", {
         "duration": "duration", "operator": "coincidence-logic",

@@ -224,9 +224,7 @@ def _auto_setup_finish_controller(
         _channel=1,
         status=status,
         _set_auto_setup_busy=lambda busy: events.append(f"busy:{busy}"),
-        _load_hardware_state=lambda: events.append("load"),
-        _update_frame_gap_enabled=lambda: events.append("gap"),
-        _update_axis_ranges=lambda: events.append("axes"),
+        reload_hardware_state=lambda: events.append("reload"),
         _on_auto_setup_finished=lambda: None,
     )
 
@@ -238,7 +236,7 @@ def test_auto_setup_finish_waits_for_thread_before_releasing_wrappers() -> None:
 
     ScopeController._on_auto_setup_finished(controller)  # type: ignore[arg-type]
 
-    assert events == ["wait:2000", "busy:False", "load", "gap", "axes", "delete"]
+    assert events == ["wait:2000", "busy:False", "reload", "delete"]
     assert controller._auto_setup_thread is None
     assert controller._auto_setup_worker is None
     assert controller.status.text == "Auto Setup failed: test failure"

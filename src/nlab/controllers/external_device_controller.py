@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections import deque
 
 import pyqtgraph as pg
@@ -37,11 +38,29 @@ def _is_boolean_spec(spec: RegisterSpec) -> bool:
     return bool(spec.scale == 1.0 and spec.min == 0 and spec.max == 1)
 
 
+# nlab-modbus 0.3 maps the firmware's reset command as an ordinary holding
+# register. Writing it restarts the board, so it is never a setting: listing it
+# would also save it with the configuration and write it back on every restore.
+_COMMAND_REGISTERS = frozenset({"reset_device_command"})
+# Board identity words (0.3 reads the whole input table). They never change
+# while connected and are not telemetry to plot.
+_IDENTITY_REGISTERS = frozenset({
+    "hardware_version", "firmware_version", "modbus_reg_version",
+    "serial_number_hi", "serial_number_lo",
+})
+
+
 def _is_service_register(name: str) -> bool:
-    """RS-485 diagnostics/config, the static-pass register, and reserved
-    (dummy_*) registers are service-mode only — not useful in normal operation.
+    """RS-485 diagnostics/config, the static-pass register, reserved (dummy_*)
+    registers, commands and identity words are not operating settings or telemetry.
     """
-    return name.startswith("rs485") or name.startswith("dummy") or name == "pass_static"
+    return (
+        name.startswith("rs485")
+        or name.startswith("dummy")
+        or name == "pass_static"
+        or name in _COMMAND_REGISTERS
+        or name in _IDENTITY_REGISTERS
+    )
 
 
 # Human-readable labels for register names shown in the Settings/Telemetry
@@ -85,6 +104,9 @@ _REGISTER_LABELS: dict[str, str] = {
     "dose_msv": "Accumulated Dose",
     "pulse_integer": "Pulse Integrator Voltage",
     "gm_supply_fault": "GM Tube Supply Fault",
+    "pulses": "Pulse Count",
+    "pwm_pulse_width_ns": "HV PWM Pulse Width",
+    "vout_overload": "Output Overload",
     # PMT HV PSU
     "hv_current": "HV Current",
     "pmt_temp": "PMT Temperature",
@@ -96,7 +118,10 @@ def _label_for(name: str) -> str:
 
 
 def _format_register_value(value: int | float) -> str:
-    return f"{value:.4f}" if isinstance(value, float) else str(value)
+    if isinstance(value, float):
+        # nlab-modbus 0.3 decodes a missing temperature sensor as NaN.
+        return f"{value:.4f}" if math.isfinite(value) else "n/a"
+    return str(value)
 
 
 def _value_placeholder(spec: RegisterSpec) -> str:
@@ -154,6 +179,7 @@ class ExternalDeviceController(QWidget):
         self._plot_ts: dict[str, deque[float]] = {}
         self._plot_values: dict[str, deque[float]] = {}
 
+        self._implemented = self._implemented_registers()
         self._build_ui()
         self._load_settings()
         if auto_start:
@@ -253,24 +279,49 @@ class ExternalDeviceController(QWidget):
         table.setFixedHeight(height)
         table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
+    def _implemented_registers(self) -> frozenset[str] | None:
+        """Register names the board's firmware implements; None lists the whole map.
+
+        nlab-modbus 0.3 detects the shorter register tables of older firmware.
+        Listing registers beyond them would leave rows that never fill and
+        settings whose writes the board rejects. A replay device has no
+        firmware to ask and already lists only the registers it recorded.
+        """
+        available = getattr(self.device, "available_registers", None)
+        if not callable(available):
+            return None
+        try:
+            return frozenset(available())
+        except Exception:
+            log.warning(
+                "Could not detect the register tables of %s; listing the full map",
+                self.device.connection_info(), exc_info=True,
+            )
+            return None
+
+    def _listed(self, name: str) -> bool:
+        return not _is_service_register(name) and (
+            self._implemented is None or name in self._implemented
+        )
+
     def _holding_specs(self) -> list[tuple[str, RegisterSpec]]:
-        """Holding (writable) registers, excluding password-protected and service ones."""
+        """Writable operating settings: no password-protected, service or command registers."""
         items = self.device.REGISTER_MAP.items()
         return [
             (n, s)
             for n, s in items
             if s.reg_type == RegisterType.HOLDING
             and not s.password_protected
-            and not _is_service_register(n)
+            and self._listed(n)
         ]
 
     def _input_specs(self) -> list[tuple[str, RegisterSpec]]:
-        """Input (telemetry) registers covered by the device's read_snapshot().
+        """Input (telemetry) registers the device's read_snapshot() returns.
 
-        hardware_version/firmware_version sit outside the READOUT_START–STOP
-        block every device class reads — read_snapshot() never returns them,
-        so a polled table would show them as permanently blank. Restricting
-        to the snapshot range keeps the table consistent with the live data.
+        nlab-modbus 0.3 reads the whole implemented input table. Version 0.2
+        read only READOUT_START..READOUT_STOP, and replay devices built from
+        its recordings still declare that range; keep to it when declared, or
+        a polled table would show registers that never fill.
         """
         start = getattr(self.device, "READOUT_START", None)
         stop = getattr(self.device, "READOUT_STOP", None)
@@ -278,7 +329,7 @@ class ExternalDeviceController(QWidget):
         specs = [
             (n, s)
             for n, s in items
-            if s.reg_type == RegisterType.INPUT and not _is_service_register(n)
+            if s.reg_type == RegisterType.INPUT and self._listed(n)
         ]
         if start is not None and stop is not None:
             specs = [(n, s) for n, s in specs if start <= s.address < stop]

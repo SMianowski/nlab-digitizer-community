@@ -13,6 +13,9 @@
         <file>icons/chevron-up-dark.svg</file>
         <file>icons/chevron-up-dark-disabled.svg</file>
         <file>icons/check.svg</file>
+        <file>icons/undock.svg</file>
+        <file>icons/undock-dark.svg</file>
+        <file>icons/blank.svg</file>
         <file>fonts/Roboto-Regular.ttf</file>
         <file>fonts/Roboto-Medium.ttf</file>
         <file>fonts/Roboto-Bold.ttf</file>

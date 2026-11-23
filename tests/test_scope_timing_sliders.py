@@ -181,3 +181,55 @@ def test_current_dma_preset_updates_sliders_without_duplicate_writes(scope, monk
         scope._dma_online_current = False
         scope._scope_dma = None
         scope._current_accumulator.finish_session()
+
+
+def _plotted_time_range(scope: ScopeController) -> list[float]:
+    return list(scope._plot_item.getViewBox().viewRange()[0])
+
+
+def test_reloaded_frame_length_refits_the_plot(scope):
+    assert scope._time_scale.unit == "\N{MICRO SIGN}s"
+    assert _plotted_time_range(scope) == pytest.approx([0, 2.048])  # 1024-sample default
+
+    scope._scope.set_frame_samples(124)  # 248 ns, e.g. from a saved configuration
+    scope.reload_hardware_state()
+
+    assert scope.ui.spinFrameSamples.value() == 248
+    assert scope._time_scale.unit == "ns"
+    assert _plotted_time_range(scope) == pytest.approx([0, 248])
+    # One persistence column per 8 ns viewer point, spread over the same range.
+    assert scope._persistence_buffer.shape[0] == 31
+    image = scope._persistence_img
+    assert image.mapRectToParent(image.boundingRect()).width() == pytest.approx(248)
+
+
+def test_loading_settings_fits_the_scope_plot_to_the_loaded_frame(
+    qtbot, tmp_path, monkeypatch,
+):
+    # Startup "Remember device configuration" restores through the same path.
+    from nlab.app import MainAppWindow
+
+    for name in ("_apply_stored_general_settings", "_persist_current_general_settings",
+                 "_apply_view_state", "_save_developer_settings"):
+        monkeypatch.setattr(MainAppWindow, name, lambda _self: None)
+    window = MainAppWindow(channels=1, offline=True)
+    qtbot.addWidget(window)
+    controller = window._controller
+    # In-memory transports only: lift the offline interlocks; this never opens IIO.
+    from nlab.controllers.global_controller import GlobalController
+
+    controller._offline = False
+    for view in window.findChildren(GlobalController):
+        view._replay_hardware_interlocked = False
+    scope = controller._scope_controllers[0]
+    saved = tmp_path / "settings.yaml"
+    scope._scope.set_frame_samples(124)
+    controller.save_all_settings(saved)
+    scope._scope.set_frame_samples(1024)
+    scope.reload_hardware_state()
+    assert _plotted_time_range(scope) == pytest.approx([0, 2.048])
+
+    controller.load_all_settings(saved)
+
+    assert scope.ui.spinFrameSamples.value() == 248
+    assert _plotted_time_range(scope) == pytest.approx([0, 248])

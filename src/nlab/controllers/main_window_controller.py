@@ -2720,7 +2720,7 @@ class MainWindowController:
                 )
 
         for idx, device in enumerate(self._devices):
-            self._scope_controllers[idx]._load_hardware_state()
+            self._scope_controllers[idx].reload_hardware_state()
             mca_ctrl = self._mca_controller_by_device.get(idx)
             if mca_ctrl is not None:
                 mca_ctrl._load_hardware_state()

@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QStandardPaths
+from PySide6.QtCore import QSettings, QSize, QStandardPaths, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,8 +20,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSpinBox,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -39,6 +42,10 @@ from nlab.views.plot_viewbox import (
 
 AUTO_CONFIGURATION_ENABLED_KEY = settings_keys.CONFIGURATION_AUTO_SAVE_ENABLED
 AUTO_CONFIGURATION_DIRECTORY = "device-configurations"
+
+# Extra category-row height and the horizontal room beside the longest name.
+_CATEGORY_ROW_PADDING = 8
+_CATEGORY_TEXT_MARGIN = 24
 
 
 def _integer_setting(
@@ -92,7 +99,10 @@ def auto_configuration_path(device_address: str) -> Path:
 
 
 class GeneralSettingsDialog(QDialog):
-    """Edit settings whose scope is the whole application."""
+    """Edit settings whose scope is the whole application.
+
+    A category list on the left selects one settings group at a time.
+    """
 
     def __init__(
         self,
@@ -102,7 +112,7 @@ class GeneralSettingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("General Settings")
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(640)
 
         appearance_group = QGroupBox("Appearance")
         appearance_form = QFormLayout(appearance_group)
@@ -225,8 +235,20 @@ class GeneralSettingsDialog(QDialog):
         self.mca_output.setToolTip(
             "Selects the application-wide MCA list-mode and coincidence output format."
         )
+        self.timestamp_chosen_names = QCheckBox("Add the start time to chosen file names")
+        self.timestamp_chosen_names.setChecked(
+            bool(values.get("timestamp_chosen_names", False))
+        )
+        self.timestamp_chosen_names.setToolTip(
+            "Blank Scope DMA, MCA list-mode and Current sum file names always get a "
+            "generated name with the start time. When checked, a name you choose also "
+            "gets _YYYYmmdd_HHMMSS (the start time) before its extension, and an "
+            "existing file is never replaced. In a series the run number follows "
+            "the time."
+        )
         files_form.addRow("Destination:", folder_row)
         files_form.addRow("MCA output:", self.mca_output)
+        files_form.addRow("File names:", self.timestamp_chosen_names)
 
         configuration_group = QGroupBox("Configuration persistence")
         configuration_form = QFormLayout(configuration_group)
@@ -255,13 +277,77 @@ class GeneralSettingsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
+        # One category per settings group: the list on the left selects which
+        # group the right side shows. Every page stays alive, so OK applies and
+        # Cancel discards the edits made on all of them, not just the visible one.
+        self.category_list = QListWidget()
+        self.category_list.setObjectName("settingsCategories")
+        self.category_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.category_list.setToolTip("Choose which group of settings to show.")
+        self.pages = QStackedWidget()
+        self.pages.setObjectName("settingsPages")
+        for group in (
+            appearance_group,
+            scope_group,
+            acquisition_group,
+            files_group,
+            configuration_group,
+        ):
+            self._add_page(group)
+        self.category_list.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.category_list.setCurrentRow(0)
+        self._fit_category_list()
+
+        body = QHBoxLayout()
+        body.addWidget(self.category_list)
+        body.addWidget(self.pages, 1)
         layout = QVBoxLayout(self)
-        layout.addWidget(appearance_group)
-        layout.addWidget(scope_group)
-        layout.addWidget(acquisition_group)
-        layout.addWidget(files_group)
-        layout.addWidget(configuration_group)
+        layout.addLayout(body, 1)
         layout.addWidget(buttons)
+        self.category_list.setFocus()
+
+    @property
+    def categories(self) -> list[str]:
+        """The category names in list order."""
+        return [
+            self.category_list.item(row).text()
+            for row in range(self.category_list.count())
+        ]
+
+    def show_category(self, name: str) -> None:
+        """Select the category called ``name`` and show its page."""
+        try:
+            row = self.categories.index(name)
+        except ValueError:
+            raise ValueError(f"no settings category named {name!r}") from None
+        self.category_list.setCurrentRow(row)
+
+    def _add_page(self, group: QGroupBox) -> None:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.addWidget(group)
+        page_layout.addStretch(1)
+        self.pages.addWidget(page)
+        item = QListWidgetItem(group.title(), self.category_list)
+        item.setSizeHint(
+            QSize(0, self.category_list.fontMetrics().height() + _CATEGORY_ROW_PADDING)
+        )
+
+    def _fit_category_list(self) -> None:
+        """Make the list exactly as wide as its longest category name."""
+        categories = self.category_list
+        categories.ensurePolished()
+        metrics = categories.fontMetrics()
+        text_width = max(
+            metrics.horizontalAdvance(categories.item(row).text())
+            for row in range(categories.count())
+        )
+        categories.setFixedWidth(
+            text_width + 2 * categories.frameWidth() + _CATEGORY_TEXT_MARGIN
+        )
 
     @property
     def theme_mode(self) -> theme.ThemeMode:
@@ -292,6 +378,7 @@ class GeneralSettingsDialog(QDialog):
             "psu_plot_time_range_s": self.psu_history.value(),
             "dma_save_folder": self.dma_folder.text().strip() or "measurements",
             "mca_dma_output_mode": str(self.mca_output.currentData()),
+            "timestamp_chosen_names": self.timestamp_chosen_names.isChecked(),
         }
 
     def _browse_dma_folder(self) -> None:

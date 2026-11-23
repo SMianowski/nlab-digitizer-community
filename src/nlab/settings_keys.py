@@ -18,6 +18,7 @@ LEGACY_CONNECTION_LAST_PORT = "connection/last_port"
 DMA_SAVE_FOLDER = "dma/save_folder"
 DMA_SAVE_FOLDER_DEFAULT = "measurements"
 MCA_DMA_OUTPUT_MODE = "dma/mca_output_mode"
+RECORDING_TIMESTAMP_CHOSEN_NAMES = "dma/timestamp_chosen_names"
 SESSION_LAST_FOLDER = "session/last_folder"
 CONFIGURATION_AUTO_SAVE_ENABLED = "configuration/auto_save_enabled"
 

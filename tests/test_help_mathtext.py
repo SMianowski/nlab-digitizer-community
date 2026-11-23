@@ -1,13 +1,23 @@
-"""Offline Markdown equation rendering in the real Qt text document."""
+"""Offline Markdown equation rendering, display and inline, in the real Qt document."""
 
 from __future__ import annotations
 
+import pytest
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QColor, QImage, QPalette, QTextDocument, QTextFormat, QTextImageFormat
+from PySide6.QtGui import (
+    QColor,
+    QImage,
+    QPalette,
+    QTextCharFormat,
+    QTextDocument,
+    QTextFormat,
+    QTextImageFormat,
+)
 from PySide6.QtWidgets import QTextBrowser
 from pytestqt.qtbot import QtBot
 
 from nlab.help import mathtext
+from nlab.help.content import load_topics
 from nlab.help.mathtext import set_help_markdown
 
 
@@ -96,3 +106,64 @@ def test_math_uses_the_help_foreground_color(qtbot: QtBot) -> None:
     first, second = _images(light)[0], _images(dark)[0]
     assert first.name() != second.name()
     assert mathtext._formula_image.cache_info().misses == 2
+
+
+def test_inline_math_renders_inside_its_sentence(qtbot: QtBot) -> None:
+    browser = QTextBrowser()
+    qtbot.addWidget(browser)
+    set_help_markdown(
+        browser,
+        r"The window is $8\times 2^e$ ns and $1/R_{raw}=\lfloor R_{x}/4\rfloor$ is derived.",
+    )
+    images = _images(browser)
+    assert [image.property(QTextFormat.Property.ImageAltText) for image in images] == [
+        r"8\times 2^e", r"1/R_{raw}=\lfloor R_{x}/4\rfloor",
+    ]
+    for image_format in images:
+        # Qt centres AlignMiddle objects on the text; the renderer pads for it.
+        assert image_format.verticalAlignment() == QTextCharFormat.VerticalAlignment.AlignMiddle
+        image = browser.document().resource(
+            QTextDocument.ResourceType.ImageResource, QUrl(image_format.name()),
+        )
+        assert isinstance(image, QImage) and not image.isNull() and image.hasAlphaChannel()
+    text = browser.toPlainText()
+    assert "$" not in text and "_" not in text  # no raw TeX, no emphasis markers lost
+    assert text.startswith("The window is ") and text.endswith(" is derived.")
+    assert browser.document().blockCount() == 1  # still one paragraph
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "Prices $5 and $10 stay text.",
+        r"An escaped \$x$ stays text.",
+        "Code `$x$` stays code.",
+        "Spaced $ x $ is not math.",
+        "```\n$x$\n```",
+        "    $x$ in an indented block",
+    ],
+)
+def test_text_that_only_looks_like_inline_math_stays_literal(
+    qtbot: QtBot, markdown: str,
+) -> None:
+    browser = QTextBrowser()
+    qtbot.addWidget(browser)
+    set_help_markdown(browser, markdown)
+    assert not _images(browser)
+    assert "$" in browser.toPlainText()
+
+
+def test_invalid_inline_math_keeps_its_tex(qtbot: QtBot) -> None:
+    browser = QTextBrowser()
+    qtbot.addWidget(browser)
+    set_help_markdown(browser, r"Before $\unknown_help_math_command{x}$ after")
+    assert not _images(browser)
+    assert browser.toPlainText() == r"Before $\unknown_help_math_command{x}$ after"
+
+
+def test_every_help_topic_renders_its_math(qtbot: QtBot) -> None:
+    browser = QTextBrowser()
+    qtbot.addWidget(browser)
+    for topic in load_topics().values():
+        set_help_markdown(browser, f"# {topic.title}\n\n{topic.markdown}")
+        assert "$" not in browser.toPlainText(), topic.key

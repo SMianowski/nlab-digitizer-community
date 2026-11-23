@@ -439,7 +439,7 @@ final coherent snapshot. Failed settings stay stopped; inspect them before START
 ## MCA — list-mode DMA and output format {#mca-dma}
 
 **Record list-mode DMA** selects event streaming from the pulse processor.
-**General Settings → MCA DMA output** chooses binary NDMA, HDF5, ROOT, or
+**General Settings → Acquisition files → MCA output** chooses binary NDMA, HDF5, ROOT, or
 online-only. Online-only intentionally creates no raw file; consumers can
 analyze the stream without another DMA owner.
 
@@ -1168,6 +1168,13 @@ The default DMA folder controls new capture destinations, not where an already
 open source file was recorded. Select a new report/output name to avoid replacing
 prior results.
 
+A blank Scope DMA, MCA list-mode or Current sum file name gets a generated name
+with the start time (`<prefix>_YYYYmmdd_HHMMSS`). **General Settings →
+Acquisition files → File names** can add the start time to a name you choose as
+well: `detector.bin` records as `detector_20261123_101500.bin`, and a name that
+already exists gains `_001` instead of being replaced. Without the option, a
+chosen name is used as given.
+
 PSD report bundles include plots, fit inputs/components, projections, diagnostics,
 and provenance. Check whether the result represents sparse preview, selected
 events, or completed full reconstruction. Exports cannot supply a missing
@@ -1177,7 +1184,10 @@ physical calibration or prove raw-capture continuity on their own.
 
 Save/Load Settings serializes application and device configuration. General
 Settings controls display defaults, polling, output destinations/formats, and
-optional automatic configuration restore.
+optional automatic configuration restore. Its categories are listed on the left:
+Appearance, Scope display, Acquisition and monitoring, Acquisition files, and
+Configuration persistence. **OK** applies the edits made on every category's
+page, including pages no longer shown; **Cancel** discards all of them.
 
 Loading settings can write hardware and is subject to acquisition ownership.
 Review the selected file and current board rather than assuming a saved setup
@@ -1240,7 +1250,9 @@ absolute paths keep their chosen location. A `.bin`, `.h5` or `.hdf5` extension
 selects that format; other names gain the selected format's extension.
 **Browse…** starts in the configured folder, and missing folders are created
 in the background. If an explicitly named file already exists, **Start**
-asks before replacing it. **Cancel** keeps the existing recording and plot unchanged.
+asks before replacing it, unless **General Settings → Acquisition files** adds the
+start time to chosen names: the timestamped name never replaces a file.
+**Cancel** keeps the existing recording and plot unchanged.
 File creation, writes, and final flush run on a background writer. Acquisition
 controls stay locked through **Stop and drain** until the recording is closed.
 **Tools > Current Capture Analysis** opens a dedicated offline browser

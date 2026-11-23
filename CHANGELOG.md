@@ -9,6 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Timestamps on chosen file names** — **General Settings → Acquisition files →
+  Add the start time to chosen file names** gives Scope DMA, MCA list-mode and
+  Current sum recordings with an operator-chosen name the same `_YYYYmmdd_HHMMSS`
+  start time that generated names carry, for example `detector_20261123_101500.bin`.
+  A stamped name never replaces an existing file or sidecar; it gains `_001`
+  instead, without the Current overwrite question. A series keeps the first run's
+  time and adds the run number after it. Off by default; coincidence session files
+  keep their own names. The choice is stored with the other General Settings and
+  in saved configuration files.
+
+### Fixed
+
+- **Scope plot matches the frame length after a restore** — restoring the remembered
+  device configuration at startup, or **Load Settings**, updated the Scope **Frame**
+  control but left the plot on the earlier time range (for example 0–2 µs for a
+  248 ns frame). The plot and persistence image now follow the loaded frame. The
+  same applies when Current DMA switches the Scope to its maximum frame (IP 122)
+  and after Auto Setup, which previously refitted the axis but not the persistence
+  image.
+- **Inline formulas in Help** — formulas written inside a sentence (`$...$`), as in the
+  CR-RC² shaping, trapezoidal 1/R and periodic-sum topics, showed as raw TeX such as
+  `$8\times 2^e$`. They now render offline as images on the text baseline, like the
+  existing display formulas; the same Markdown still renders on the wiki. Prices such
+  as "$5 and $10", escaped `\$` and code stay literal.
+- **Undock button in panel title bars** — in the EWT light and dark themes the button
+  at the right of a panel's title bar (for example **D1:CH0**) was squeezed into an
+  18×10 px sliver with a blurred icon. It is now an 18 px button with a sharp themed
+  "pop out" icon and a hover highlight, and every panel's button has the tooltip
+  **Undock current tab**. Classic keeps the platform's own button.
+- **Long tooltips wrap** — a long plain-text tooltip, such as **Repeats** in the Scope,
+  MCA and Current views, was shown on one line across the whole screen. Every
+  widget's tooltip is now shown wrapped at about 68 characters, including tooltips
+  that change while the application runs. The text is not changed: F1 help still
+  shows the original, and rich-text tooltips, which Qt already wraps, are unaffected.
+
+### Changed
+
+- **General Settings categories** — the dialog lists its groups (Appearance, Scope
+  display, Acquisition and monitoring, Acquisition files, Configuration persistence)
+  on the left and shows the selected one on the right, instead of stacking every
+  group in one tall window. The settings themselves are unchanged; **OK** still
+  applies the edits on every page and **Cancel** discards them.
+- **nlab-modbus 0.3.0** (was 0.2.7) for the External SiPM, Geiger and PMT HV PSU
+  modules. Its register maps now follow the firmware tables, each poll reads the
+  whole input table in one transaction, and older firmware with shorter tables is
+  detected. In the External view:
+  - Telemetry gains the registers 0.2.7 never refreshed: SiPM **Output Overload**,
+    Geiger **Pulse Count**, and the HV PWM pulse width.
+  - Rows for registers a board's firmware does not implement are left out.
+  - A missing temperature sensor shows **n/a** instead of −300 °C.
+  - The new reset-command register is never offered as a setting, saved with a
+    configuration or written on restore. Identity words (version, serial number)
+    are not listed as telemetry.
+  - Discovery waits 0.10 s instead of 0.05 s for each absent Modbus ID, as the
+    library now derives the probe timeout from the 9600-baud gateway link.
+
 ## [0.9.3] — 2026-11-20
 
 Measurement series: one Start repeats a timed Scope, MCA or Current measurement

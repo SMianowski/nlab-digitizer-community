@@ -54,6 +54,7 @@ from nlab.hardware.digitizer.scope import (
 from nlab.ui.ui_scope_view import Ui_ScopeView
 from nlab.utils.recording_paths import (
     available_path,
+    chosen_recording_path,
     measurement_folder,
     unique_recording_path,
 )
@@ -379,6 +380,31 @@ class ScopeController(QWidget):
         ):
             slider.setValue(spinbox.value())
         self.ui.comboTriggerMode.setCurrentIndex(self.ui.comboTriggerMode.findData(self._scope.get_trigger_mode().value))
+
+    def reload_hardware_state(self) -> None:
+        """Show the settings the hardware now holds, e.g. after Load Settings.
+
+        Use this, not _load_hardware_state(), once the plot exists: it also
+        fits the plot to the frame length that was loaded.
+        """
+        self._load_hardware_state()
+        self._update_frame_gap_enabled()
+        self._show_frame_geometry()
+
+    def _show_frame_geometry(self) -> None:
+        """Fit the plot and persistence image to the frame the widgets show.
+
+        A frame length set in code never commits; only editingFinished or a
+        slider release reaches _on_frame_samples_changed(). Code that changes
+        the frame widgets must call this, or the plot keeps the old time range.
+        """
+        frame_samples = self._frame_samples_from_ui()
+        if self._display_nx != frame_samples // 4:
+            self._reset_persistence_buffer(frame_samples)
+            self._persistence_img.setImage(
+                self._persistence_buffer, autoLevels=False, levels=(0, 1)
+            )
+        self._update_axis_ranges()
 
     # ------------------------------------------------------------------
     # Display settings persistence
@@ -1357,7 +1383,7 @@ class ScopeController(QWidget):
         )
         self._set_dma_checkbox_without_write(True)
         self._update_frame_gap_enabled()
-        self._update_viewer_transport_hint()
+        self._show_frame_geometry()  # also refreshes the viewer transport hint
 
         assert self._scope_dma is not None
         assert self._current_accumulator is not None
@@ -1440,12 +1466,17 @@ class ScopeController(QWidget):
 
     def _next_dma_filepath(self) -> Path:
         """The chosen or generated recording, numbered while a series runs."""
+
+        def chosen_or_generated() -> Path:
+            chosen = self._dma_filepath
+            if chosen is None:
+                return self._generate_filepath()
+            return chosen_recording_path(chosen)
+
         series = owner_series(self)
-        numbered = None if series is None else series.recording_path(
-            lambda: self._dma_filepath or self._generate_filepath()
-        )
+        numbered = None if series is None else series.recording_path(chosen_or_generated)
         if numbered is None:
-            return self._dma_filepath or self._generate_filepath()
+            return chosen_or_generated()
         filepath = available_path(numbered)
         log.info("Scope DMA: series filepath: %s", filepath)
         return filepath
@@ -1742,9 +1773,7 @@ class ScopeController(QWidget):
                 self._apply_session_replay_controls()
                 return
             self._set_auto_setup_busy(False)
-            self._load_hardware_state()
-            self._update_frame_gap_enabled()
-            self._update_axis_ranges()
+            self.reload_hardware_state()
         except Exception as exc:
             log.exception("Scope ch%d: failed to refresh after Auto Setup", self._channel)
             self.status.setText(f"Auto Setup refresh failed: {exc}")

@@ -387,3 +387,42 @@ finally:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("mode", ["light", "dark", "classic"])
+def test_float_button_is_a_labelled_full_size_undock_button(qtbot: QtBot, mode: str) -> None:
+    from PySide6.QtCore import QFile
+    from PySide6.QtWidgets import QAbstractButton
+
+    from nlab.views import theme
+    from nlab.views.panel_dock import FLOAT_BUTTON_SIZE, UNDOCK_TOOLTIP
+
+    theme.register_fonts()  # also registers the compiled :/icons resources
+    host, controller = _workspace(qtbot)
+    colors = theme.THEMES[theme.ThemeMode(mode)]
+    stylesheet = theme.application_stylesheet(colors)
+    host.setStyleSheet(stylesheet)
+    first = controller._make_dock("scope_ch0", "D1:CH0", QWidget())
+    second = controller._make_dock("scope_ch1", "D1:CH1", QWidget())
+    host.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, first)
+    host.tabifyDockWidget(first, second)
+    host.show()
+    QApplication.processEvents()
+
+    for dock in (first, second):
+        button = dock.findChild(QAbstractButton, "qt_dockwidget_floatbutton")
+        assert button is not None
+        assert button.toolTip() == UNDOCK_TOOLTIP == "Undock current tab"
+    button = second.findChild(QAbstractButton, "qt_dockwidget_floatbutton")
+    assert button is not None and button.isVisible()
+    # Qt alone leaves an 18x10 sliver under a style sheet; the slot is 18 px square.
+    assert button.width() >= FLOAT_BUTTON_SIZE and button.height() >= FLOAT_BUTTON_SIZE
+    assert second.rect().contains(button.geometry())
+    if mode != "classic":  # Classic keeps the platform's own button.
+        icon = f":/icons/undock{colors.icon_suffix}.svg"
+        assert f"image: url({icon})" in stylesheet
+        assert QFile.exists(icon) and QFile.exists(":/icons/blank.svg")
+
+    button.click()
+    QApplication.processEvents()
+    assert second.isFloating()

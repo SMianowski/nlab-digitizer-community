@@ -17,6 +17,7 @@ from nlab.utils.windows_icon import apply_taskbar_icon
 from nlab.views.gui_gc import install_gui_garbage_collector
 from nlab.views.numeric_controls import install_numeric_input_policy
 from nlab.views.theme import apply_application_theme, brand_splash_pixmap, splash_style
+from nlab.views.tooltips import install_tooltip_wrapping
 
 if TYPE_CHECKING:
     from nlab.app import MainAppWindow as _MainAppWindow
@@ -159,6 +160,7 @@ def main() -> None:
     app = QApplication([sys.argv[0], *qt_args])
     install_gui_garbage_collector()
     install_numeric_input_policy()
+    install_tooltip_wrapping()
     _icon = QIcon(":/icons/ewt.ico")
     log.info(
         "App icon from qrc resource: isNull=%s sizes=%s", _icon.isNull(), _icon.availableSizes()

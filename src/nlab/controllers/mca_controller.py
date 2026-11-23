@@ -41,6 +41,7 @@ from nlab.hardware.digitizer.scope import RangeSpec, range_spec
 from nlab.ui.ui_mca_view import Ui_MCAView
 from nlab.utils.recording_paths import (
     available_path,
+    chosen_recording_path,
     measurement_folder,
     unique_recording_path,
 )
@@ -2020,7 +2021,7 @@ class MCAController(QWidget):
         """Core name of one series: the chosen DMA file, or a new default."""
         chosen, self._dma_filepath = self._dma_filepath, None
         if chosen is not None:
-            return chosen
+            return chosen_recording_path(chosen)
         return unique_recording_path(
             f"ch{self._channel}",
             ".csv",
@@ -2535,8 +2536,14 @@ class MCAController(QWidget):
                 else available_path(series_base.with_suffix(".csv"))
             )
         else:
+            chosen = self._dma_filepath
+            if chosen is not None and _coincidence_role(self) is CoincidenceRole.NONE:
+                # The operator's file. A coincidence session names its own files.
+                chosen = chosen_recording_path(
+                    chosen, sidecar_suffixes=MCAController._sidecar_suffixes(mode)
+                )
             filepath = None if mode is McaDmaOutputMode.ONLINE else (
-                self._dma_filepath or self._generate_filepath(mode)
+                chosen or self._generate_filepath(mode)
             )
         if filepath is not None and filepath.suffix.lower() != mode.extension:
             filepath = self._available_filepath(

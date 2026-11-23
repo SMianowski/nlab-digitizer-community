@@ -35,6 +35,7 @@ from nlab.hardware.digitizer.scope import (
 from nlab.ui.ui_current_monitor_view import Ui_CurrentMonitorView
 from nlab.utils.recording_paths import (
     available_path,
+    chosen_recording_path,
     measurement_folder,
     unique_recording_path,
 )
@@ -693,7 +694,8 @@ class CurrentMonitorController(QWidget):
         """Resolve explicit names or generate a fresh name in the measurement folder.
 
         A .bin, .h5 or .hdf5 extension selects that format; any other name
-        gains the extension of the format selected in the GUI.
+        gains the extension of the format selected in the GUI. An explicit name
+        gets the start timestamp when General Settings asks for it.
         """
         suffix = _SUM_FORMAT_SUFFIX[self._sum_format()]
         filename = self.ui.editSumFile.text().strip()
@@ -701,9 +703,9 @@ class CurrentMonitorController(QWidget):
             output = Path(filename).expanduser()
             if output.suffix.lower() not in _SUFFIX_SUM_FORMAT:
                 output = output.with_name(output.name + suffix)
-            if output.is_absolute():
-                return output
-            return measurement_folder() / output
+            if not output.is_absolute():
+                output = measurement_folder() / output
+            return chosen_recording_path(output)
         return unique_recording_path(f"ch{self._channel}_current", suffix, create_folder=False)
 
     def _choose_sum_output(self) -> None:

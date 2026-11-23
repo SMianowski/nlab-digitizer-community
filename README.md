@@ -59,6 +59,10 @@ uv run nlab
 Generate the UI files after a fresh clone or changes to the forms/resources.
 For subsequent launches, run `uv run nlab` from the project directory.
 
+**Settings > General Settings** lists its categories on the left (Appearance, Scope
+display, Acquisition and monitoring, Acquisition files, Configuration persistence) and
+shows the selected one on the right; **OK** applies the changes made on every page.
+
 Choose the interface theme under **Settings > General Settings > Appearance**:
 **EWT light** (default), **EWT dark** or **Classic** (the platform's native style and
 the original colours). The choice applies the next time the application starts;
@@ -106,6 +110,12 @@ filename blank for `ch0_current_<timestamp>.bin` on Start, or enter your own
 name or path. Saving runs in the background and asks before
 replacing an existing file. **Time [s]** stops a Current acquisition after that
 many seconds; 0 runs until **Stop**.
+
+A name you choose for a Scope DMA, MCA list-mode or Current sum recording is used
+as given. To add the start time to it as well, check **Settings > General Settings >
+Acquisition files > Add the start time to chosen file names**: `detector.bin` then
+records as `detector_20261123_101500.bin`, and an existing file is never replaced.
+In a series the run number follows the time (`detector_20261123_101500_001.bin`).
 
 ### Repeat a measurement
 
