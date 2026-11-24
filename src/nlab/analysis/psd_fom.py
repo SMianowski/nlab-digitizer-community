@@ -1,7 +1,8 @@
 """Joint and independent Gaussian figure-of-merit fits for PSD projections.
 
-The figure of merit is the centroid separation over the summed FWHM of the
-two populations (Winyard et al. 1971). Fits minimise the Poisson likelihood
+The figure of merit is the peak separation over the summed FWHM of the two
+populations (Winyard et al. 1971), the peaks here being the fitted Gaussian
+centroids. Fits minimise the Poisson likelihood
 chi-square of Baker and Cousins (1984), whose signed square-root terms are
 the residuals of ``_poisson_deviance_residual``, with lmfit's MINPACK
 Levenberg-Marquardt solver (Marquardt 1963; Madsen et al. 2004; Newville
@@ -19,7 +20,7 @@ Marquardt, D. W. (1963). An algorithm for least-squares estimation of
     nonlinear parameters. J. Soc. Ind. Appl. Math. 11, 431-441.
     doi:10.1137/0111030
 Madsen, K., Nielsen, H. B., Tingleff, O. (2004). Methods for Non-Linear
-    Least Squares Problems. IMM, Technical University of Denmark.
+    Least Squares Problems, 2nd ed. IMM, Technical University of Denmark.
 Newville, M., Stensitzki, T., Allen, D. B., Ingargiola, A. (2014).
     LMFIT: Non-linear least-square minimization and curve-fitting for
     Python. Zenodo. doi:10.5281/zenodo.11813

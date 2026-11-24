@@ -6,10 +6,11 @@ Gaussian model stops describing them, and the FOM understates the separation
 reached at each energy. Fitting slices of the ROI with the same fit settings
 shows how separation develops with energy and where the fit can be trusted.
 
-Narrow energy cuts keep each projection close to Gaussian, as in the
-FOM-versus-energy analysis of Grodzicka-Kobylka et al. (2020). The light-yield
-(energy) dependence of the FOM is analysed by Sénoville et al. (2020), and
-Graham and Jovanovic (2024) adapt the integration gates to light output.
+Narrow energy cuts keep each projection close to Gaussian; Grodzicka-Kobylka
+et al. (2020) use +/-10 % energy cuts on zero-crossing-time spectra for this
+reason. Sénoville et al. (2020) measure the FOM in narrow energy intervals and
+show that its energy dependence is dominated by the square root of the total
+light, and Graham et al. (2026) adapt the integration gates to light output.
 
 References
 ----------
@@ -21,9 +22,10 @@ Sénoville, M., Delaunay, F., Pârlog, M., Achouri, N. L., Orr, N. A.
     (2020). Neutron-gamma discrimination with organic scintillators:
     intrinsic pulse shape and light yield contributions. Nucl. Instrum.
     Methods Phys. Res. A 971, 164080. doi:10.1016/j.nima.2020.164080
-Graham, C., Jovanovic, I. (2024). Light output-dependent integration
-    gating for optimized pulse-shape discrimination. IEEE NSS/MIC/RTSD 2024.
-    doi:10.1109/NSS/MIC/RTSD57108.2024.10658350
+Graham, C., Todd, E., Wilson, C., et al. (2026). Light output-dependent
+    integration gating for optimized pulse shape discrimination. Nucl.
+    Instrum. Methods Phys. Res. A 1088, 171521.
+    doi:10.1016/j.nima.2026.171521
 """
 
 from __future__ import annotations

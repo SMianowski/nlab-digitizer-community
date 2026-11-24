@@ -4,6 +4,30 @@ Fine timing follows PetaLinux's explicitly selected
 ``vdpp-zc-calc-q2.14-v1`` profile. The kernel still transports opaque records;
 the producer schema, common epoch, and channel-delay calibration remain
 measurement qualifications rather than properties of the IIO transport.
+
+Fine timing places the constant-fraction zero crossing (Gedcke and McDonald
+1968) to a fraction of a sample, as digital CFD does by interpolating between
+samples (Fallu-Labruyere et al. 2007); Moszyński and Bengtson (1979) review
+timing with plastic scintillators. Chance coincidences of uncorrelated events
+occur at a rate proportional to the window width, and a window delayed well
+away from the prompt peak measures them alone (Knoll 2010, ch. 17), so
+equal-width delayed sidebands estimate the random background under the
+prompt window.
+
+References
+----------
+Gedcke, D. A., McDonald, W. J. (1968). Design of the constant fraction of
+    pulse height trigger for optimum time resolution. Nucl. Instrum. Methods
+    58, 253-260. doi:10.1016/0029-554X(68)90473-4
+Fallu-Labruyere, A., Tan, H., Hennig, W., Warburton, W. K. (2007). Time
+    resolution studies using digital constant fraction discrimination.
+    Nucl. Instrum. Methods Phys. Res. A 579, 247-251.
+    doi:10.1016/j.nima.2007.04.048
+Moszyński, M., Bengtson, B. (1979). Status of timing with plastic
+    scintillation detectors. Nucl. Instrum. Methods 158, 1-31.
+    doi:10.1016/S0029-554X(79)90170-8
+Knoll, G. F. (2010). Radiation Detection and Measurement, 4th ed.
+    Wiley, Hoboken NJ. ISBN 978-0-470-13148-0
 """
 
 from __future__ import annotations
@@ -99,7 +123,11 @@ class CoincidenceSettings:
 
     @property
     def random_scale(self) -> float:
-        """Scale two equal-width sidebands to one prompt-window width."""
+        """Scale two equal-width sidebands to one prompt-window width.
+
+        Chance coincidences scale with window width (Knoll 2010), so the
+        mean of the two sidebands estimates the random prompt background.
+        """
         return 0.5 if self.random_sidebands else 0.0
 
 

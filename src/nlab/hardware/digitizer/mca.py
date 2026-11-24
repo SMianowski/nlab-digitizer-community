@@ -704,7 +704,16 @@ class MultiChannelAnalyzer:
         self._b.set_temp_offset(val)
 
     def set_temperature_correction(self, coefficient: float, offset: int) -> None:
-        """Set both correction terms through a worker-safe path if provided."""
+        """Set both correction terms through a worker-safe path if provided.
+
+        The correction offsets temperature drift of the energy scale, which
+        combines the temperature dependence of scintillator light output and
+        of photodetector gain (Moszyński et al., NIM A 568 (2006) 739,
+        doi:10.1016/j.nima.2006.06.039). Pausch et al. (IEEE TNS 52 (2005)
+        1849, doi:10.1109/TNS.2005.856616) derive the correction from the
+        scintillation decay time instead, because surface temperature sensors
+        misrepresent the crystal temperature during transients.
+        """
         MCA_PARAMETER_SPECS[MCAParam.TEMP_COEFF].validate(
             coefficient,
             "temperature_coefficient",

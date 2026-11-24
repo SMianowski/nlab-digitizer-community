@@ -140,6 +140,16 @@ class HVSupply:
         return self._b.get_sipm_overload()
 
     # ---- SiPM temperature compensation ----
+    # The SiPM breakdown voltage rises about linearly with temperature, by tens
+    # of mV per degree C depending on the device (Otte et al., NIM A 846 (2017)
+    # 106, doi:10.1016/j.nima.2016.09.053; Grodzicka et al., JINST 9 (2014)
+    # P08004, doi:10.1088/1748-0221/9/08/P08004). Gain follows the
+    # overvoltage, so at a fixed bias it falls as the temperature rises.
+    # Moving the bias with the breakdown voltage keeps overvoltage and gain
+    # constant; Licciulli & Marzocca (IEEE TNS 62 (2015) 228,
+    # doi:10.1109/TNS.2015.2388580) do this in a closed loop on a dark SiPM.
+    # Ct (bias temperature coefficient) and Tref parameterize an open-loop
+    # linear correction, so Ct should match the device's coefficient.
 
     def set_sipm_compens_ct(self, val: float) -> None:
         self._require_sipm()

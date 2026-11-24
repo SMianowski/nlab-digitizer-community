@@ -1,4 +1,16 @@
-"""Incremental, bounded-memory MCA list-mode file writers."""
+"""Incremental, bounded-memory MCA list-mode file writers.
+
+ROOT TTree output (Brun and Rademakers 1997) is written with Uproot
+(Pivarski et al.).
+
+References
+----------
+Brun, R., Rademakers, F. (1997). ROOT - an object oriented data analysis
+    framework. Nucl. Instrum. Methods Phys. Res. A 389, 81-86.
+    doi:10.1016/S0168-9002(97)00048-X
+Pivarski, J., Schreiner, H., Hollands, A., et al. Uproot. Zenodo.
+    doi:10.5281/zenodo.4340632 (all versions)
+"""
 
 from __future__ import annotations
 

@@ -2,10 +2,10 @@
 
 Each pulse is baseline-subtracted (median or mean of a pre-pulse window) and
 summed over a short and a long gate; the PSD ratio is the tail fraction
-(Qlong - Qshort) / Qlong. This is digital charge comparison (Moszyński et
-al. 1992). Kaschuck and Esposito (2005) apply digital PSD to organic
-scintillators, Söderström et al. (2008) compare charge-comparison and
-zero-crossover algorithms on sampled liquid-scintillator pulses, and
+(Qlong - Qshort) / Qlong. This is the charge-comparison method (Moszyński et
+al. 1992) applied to sampled waveforms, as Kaschuck and Esposito (2005) do
+for organic scintillators; Söderström et al. (2008) compare charge-comparison
+and zero-crossover algorithms on sampled liquid-scintillator pulses, and
 Nakhostin (2017) covers the underlying signal processing.
 
 References

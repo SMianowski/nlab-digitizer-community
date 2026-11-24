@@ -7,6 +7,17 @@ parent decays by the build script. No network access occurs at runtime.
 The catalogue does not predict measured peak height. Detector efficiency,
 attenuation, geometry, coincidence summing, and dead time remain outside this
 model.
+
+ENSDF is described by Tuli (1996); the separately attributed Na-22
+annihilation row comes from IRDFF-II (Trkov et al. 2020).
+
+References
+----------
+Tuli, J. K. (1996). Evaluated nuclear structure data file. Nucl. Instrum.
+    Methods Phys. Res. A 369, 506-510. doi:10.1016/S0168-9002(96)80040-4
+Trkov, A., Griffin, P. J., Simakov, S. P., et al. (2020). IRDFF-II: a new
+    neutron metrology library. Nucl. Data Sheets 163, 1-108.
+    doi:10.1016/j.nds.2019.12.001
 """
 
 from __future__ import annotations

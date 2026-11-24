@@ -1,4 +1,14 @@
-"""Immutable one-dimensional spectra and count-aware arithmetic operations."""
+"""Immutable one-dimensional spectra and count-aware arithmetic operations.
+
+Raw counts carry Poisson variances, and arithmetic propagates variances to
+first order for independent operands, following the counting statistics in
+Knoll (2010, ch. 3).
+
+References
+----------
+Knoll, G. F. (2010). Radiation Detection and Measurement, 4th ed.
+    Wiley, Hoboken NJ. ISBN 978-0-470-13148-0
+"""
 
 from __future__ import annotations
 

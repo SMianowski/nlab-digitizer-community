@@ -13,10 +13,12 @@ Qtotal=trapezoid_energy is source-derived and unit-tested but has not yet
 been confirmed against a labelled live source.  The GUI consequently labels
 the two populations "below cut" and "above cut", not neutron/gamma.
 
-Comparing the charge in a short (prompt) gate with the total charge is the
-charge-comparison method of Brooks (1959); Moszyński et al. (1992) describe
-its digital form for a large liquid scintillator, and Knoll (2010, ch. 17)
-reviews pulse shape discrimination.
+Comparing prompt and total charge goes back to Brooks (1959), whose analogue
+circuit balanced a short- against a long-time-constant electrode pulse.
+Moszyński et al. (1992) digitised a total-charge gate and a delayed
+slow-component gate of a 4 l liquid scintillator with two QDCs; the ratio
+here is the corresponding tail-to-total fraction. Knoll (2010) reviews pulse
+shape discrimination in ch. 17 and its n/gamma use in ch. 8 and 15.
 
 References
 ----------

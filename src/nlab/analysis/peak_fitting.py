@@ -1,4 +1,26 @@
-"""Constrained lmfit models for one-dimensional MCA photopeak analysis."""
+"""Constrained lmfit models for one-dimensional MCA photopeak analysis.
+
+Photopeaks are Gaussians on a selectable background (Gilmore and Joss 2024).
+The 'compton' background adds the Gaussian-smoothed step
+0.5 * A * erfc((x - mu) / (sqrt(2) * sigma)) below the peak, sharing its
+centroid and width: the step term of Phillips and Marlow (1976). Poisson
+fits minimise the Poisson likelihood chi-square of Baker and Cousins (1984);
+models are built and fitted with lmfit (Newville et al. 2014).
+
+References
+----------
+Gilmore, G., Joss, D. (2024). Practical Gamma-ray Spectrometry, 3rd ed.
+    Wiley. doi:10.1002/9781394286577
+Phillips, G. W., Marlow, K. W. (1976). Automatic analysis of gamma-ray
+    spectra from germanium detectors. Nucl. Instrum. Methods 137, 525-536.
+    doi:10.1016/0029-554X(76)90472-9
+Baker, S., Cousins, R. D. (1984). Clarification of the use of chi-square
+    and likelihood functions in fits to histograms. Nucl. Instrum. Methods
+    Phys. Res. 221, 437-442. doi:10.1016/0167-5087(84)90016-4
+Newville, M., Stensitzki, T., Allen, D. B., Ingargiola, A. (2014).
+    LMFIT: Non-linear least-square minimization and curve-fitting for
+    Python. Zenodo. doi:10.5281/zenodo.11813
+"""
 
 from __future__ import annotations
 
@@ -409,6 +431,7 @@ def _compton_step(
     center: float,
     sigma: float,
 ) -> np.ndarray:
+    # Step background under a Gaussian peak (Phillips and Marlow 1976).
     from scipy.special import erfc
 
     return np.asarray(
@@ -443,6 +466,7 @@ def _resolve_statistic(
 
 
 def _poisson_deviance_residual(observed: np.ndarray, calculated: np.ndarray) -> np.ndarray:
+    """Signed square roots of the Poisson likelihood chi-square terms (Baker & Cousins 1984)."""
     floor = np.finfo(np.float64).tiny
     expected = np.clip(calculated, floor, None)
     log_term = np.zeros_like(observed)

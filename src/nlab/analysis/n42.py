@@ -3,6 +3,14 @@
 The bundled schema files are the NIST-published ANSI/IEEE N42.42-2020
 artifacts.  The standard intentionally retains the 2011 XML namespace.
 External entities, schemas, and location hints are never resolved.
+
+The format is defined by ANSI/IEEE N42.42-2020; NIST publishes its schemas.
+
+References
+----------
+ANSI/IEEE N42.42-2020. American National Standard Data Format for
+    Radiation Detectors Used for Homeland Security. IEEE, 2020. Schemas:
+    https://www.nist.gov/pml/radiation-physics/ansiieee-n4242-2020-version
 """
 
 from __future__ import annotations

@@ -15,8 +15,8 @@ General Settings lists its groups as categories and can add the start time to
 recording names you choose. The Scope plot follows a restored frame length,
 formulas inside Help sentences render, long tooltips wrap, panel undock buttons
 are full size, and External modules use nlab-modbus 0.3.0. The PSD readback asks
-to recalculate after histogram changes and fits FOM versus energy, and the PSD
-help cites the literature its methods follow.
+to recalculate after histogram changes and fits FOM versus energy, and Help cites
+the literature behind the application's methods.
 
 ### Added
 
@@ -38,11 +38,26 @@ help cites the literature its methods follow.
   `fom_vs_energy.csv` when slices have been fitted. **Use best slice as ROI** sets
   the readback's FOM energy ROI to the slice with the highest FOM among fits without
   warnings and refits the FOM panel there, reproducing that slice's FOM.
-- **PSD literature references** — the help topics on the PSD ratio, charge comparison,
-  zero crossing, the FOM fit, FOM versus energy, waveform reconstruction and the gate
-  search, and the matching analysis modules, now cite the papers their methods follow
-  (for example Brooks 1959 for charge comparison, Winyard et al. 1971 for the FOM,
-  Baker and Cousins 1984 for the Poisson likelihood fit), with DOIs.
+- **Literature references** — help topics and the matching modules cite the papers
+  and books their methods follow, with DOIs checked against Crossref and each claim
+  checked against the full text:
+  - PSD: charge comparison (Brooks 1959; Moszyński et al. 1992), zero crossing, the
+    FOM (Winyard et al. 1971) and its Poisson likelihood fit (Baker and Cousins
+    1984), FOM versus energy, waveform reconstruction and the gate search.
+  - MCA shaping: digital trapezoidal shaping (Jordanov and Knoll 1994), recursive
+    CR-(RC)ⁿ shaping (Nakhostin 2011), and constant-fraction timing (Gedcke and
+    McDonald 1968; Fallu-Labruyere et al. 2007).
+  - Coincidence: constant-fraction fine timing, and chance coincidences estimated
+    from delayed sidebands (Knoll 2010).
+  - Spectrum analysis: energy calibration and the quadratic model (Gilmore and Joss
+    2024; Kong et al. 2010); the peak-fit step background and Poisson statistic
+    (Phillips and Marlow 1976; Baker and Cousins 1984); decay data from ENSDF and
+    IRDFF-II.
+  - Temperature compensation: SiPM breakdown-voltage and gain drift with bias
+    compensation, and the temperature dependence of scintillator light output and
+    photodetector gain.
+  - Current mode, ROOT and Uproot output, and the ANSI/IEEE N42.42-2020 format.
+  - About lists NumPy, SciPy, Matplotlib, lmfit and Uproot.
 - **Timestamps on chosen file names** — **General Settings → Acquisition files →
   Add the start time to chosen file names** gives Scope DMA, MCA list-mode and
   Current sum recordings with an operator-chosen name the same `_YYYYmmdd_HHMMSS`

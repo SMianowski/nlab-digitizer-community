@@ -255,6 +255,11 @@ stopped. Inspect [debug sources](#mca-debug), then start a histogram or
 [list-mode capture](#mca-dma). Configuration changes during ordinary acquisition
 can begin a new accumulation; list DMA requires its full stop/drain lifecycle.
 
+**References** — Digital pulse processing for spectroscopy.
+
+- Knoll, G. F. (2010). *Radiation Detection and Measurement*, 4th ed. Wiley. ISBN 978-0-470-13148-0
+- Nakhostin, M. (2017). *Signal Processing for Radiation Detectors*. Wiley. doi:10.1002/9781119410225
+
 ## MCA — pulse polarity {#mca-polarity}
 
 Polarity tells the pulse processor whether detector pulses are negative- or
@@ -365,6 +370,10 @@ Scope observes the raw ADC branch. MCA sees temperature correction, the optional
 DC blocker, and FIR shaping. **Bypass DC blocker** maps to disable=1; unchecked
 maps to disable=0. The MCA FIR response remains fixed at 70 MHz.
 
+**References** — Recursive digital CR-(RC)ⁿ shaping.
+
+- Nakhostin, M. (2011). Recursive algorithms for real-time digital CR-(RC)ⁿ pulse shaping. *IEEE Trans. Nucl. Sci.* 58, 2378–2381. doi:10.1109/TNS.2011.2164556
+
 ## MCA — constant-fraction discriminator {#mca-cfd}
 
 The constant-fraction multiplier is raw/32768 with raw=0..32767: its maximum
@@ -384,6 +393,11 @@ pretrigger history is reported as a false offset 0. The default window
 when CFD is enabled and the window starts earlier; the hardware does not
 enforce the rule.
 
+**References** — Constant-fraction timing, analogue and digital.
+
+- Gedcke, D. A., McDonald, W. J. (1968). Design of the constant fraction of pulse height trigger for optimum time resolution. *Nucl. Instrum. Methods* 58, 253–260. doi:10.1016/0029-554X(68)90473-4
+- Fallu-Labruyere, A., Tan, H., Hennig, W., Warburton, W. K. (2007). Time resolution studies using digital constant fraction discrimination. *Nucl. Instrum. Methods Phys. Res. A* 579, 247–251. doi:10.1016/j.nima.2007.04.048
+
 ## MCA — trapezoidal shaping and energy {#mca-trapezoid}
 
 **R**, **M**, and **Energy time** use nanoseconds. R is 16..4088 ns,
@@ -402,6 +416,11 @@ the hardware API.
 
 Shaping changes noise, pileup behavior, and energy calibration. Recheck a
 calibration after material changes; saved fingerprints include ABI and units.
+
+**References** — Digital trapezoidal shaping.
+
+- Jordanov, V. T., Knoll, G. F. (1994). Digital synthesis of pulse shapes in real time for high resolution radiation spectroscopy. *Nucl. Instrum. Methods Phys. Res. A* 345, 337–345. doi:10.1016/0168-9002(94)91011-1
+- Jordanov, V. T., Knoll, G. F., Huber, A. C., Pantazis, J. A. (1994). Digital techniques for real-time pulse shaping in radiation measurements. *Nucl. Instrum. Methods Phys. Res. A* 353, 261–264. doi:10.1016/0168-9002(94)91652-7
 
 ## MCA — charge comparison {#mca-charge}
 
@@ -507,11 +526,11 @@ event readback uses recorded event fields. These are related workflows, not
 interchangeable settings. Inspect the [energy ROI](#psd-roi), [cut](#psd-cut),
 and [FOM fit](#fom) before interpreting separation as particle discrimination.
 
-**References** — The live ratio is the digital charge-comparison method.
+**References** — The live ratio is a charge-comparison ratio: the method's analogue origin, a two-gate QDC implementation, and a textbook review.
 
 - Brooks, F. D. (1959). A scintillation counter with neutron and gamma-ray discriminators. *Nucl. Instrum. Methods* 4, 151–163. doi:10.1016/0029-554X(59)90067-9
 - Moszyński, M., Bizard, G., Costa, G. J., et al. (1992). Study of n-γ discrimination by digital charge comparison method for a large volume liquid scintillator. *Nucl. Instrum. Methods Phys. Res. A* 317, 262–272. doi:10.1016/0168-9002(92)90617-D
-- Knoll, G. F. (2010). *Radiation Detection and Measurement*, 4th ed., ch. 17. Wiley. ISBN 978-0-470-13148-0
+- Knoll, G. F. (2010). *Radiation Detection and Measurement*, 4th ed., ch. 8, 15 and 17. Wiley. ISBN 978-0-470-13148-0
 
 ## PSD — histogram resolution {#psd-bins}
 
@@ -921,11 +940,12 @@ The winning gates are reconstructed and refitted on the normal selected dataset.
 Its FOM can differ from the sampled search result. The search does not demonstrate
 out-of-sample performance or a globally optimal detector configuration.
 
-**References** — Other approaches to choosing integration gates.
+**References** — FOM-maximising gate choice and other approaches to choosing integration gates.
 
+- Sénoville, M., Delaunay, F., Pârlog, M., Achouri, N. L., Orr, N. A. (2020). Neutron-γ discrimination with organic scintillators: intrinsic pulse shape and light yield contributions. *Nucl. Instrum. Methods Phys. Res. A* 971, 164080. doi:10.1016/j.nima.2020.164080
 - Zhou, J., Abdulaziz, A., Altmann, Y., Di Fulvio, A. (2023). Generalized method for the optimization of pulse shape discrimination parameters. *Nucl. Instrum. Methods Phys. Res. A* 1050, 168184. doi:10.1016/j.nima.2023.168184
 - Kaplan, A. D., Blair, B., Glenn, A., Wurtz, R. (2023). Automated integration gate selection for Gaussian mixture model pulse shape discrimination. *Nucl. Instrum. Methods Phys. Res. A* 1055, 168486. doi:10.1016/j.nima.2023.168486
-- Graham, C., Jovanovic, I. (2024). Light output-dependent integration gating for optimized pulse-shape discrimination. *IEEE NSS/MIC/RTSD 2024*. doi:10.1109/NSS/MIC/RTSD57108.2024.10658350
+- Graham, C., Todd, E., Wilson, C., et al. (2026). Light output-dependent integration gating for optimized pulse shape discrimination. *Nucl. Instrum. Methods Phys. Res. A* 1088, 171521. doi:10.1016/j.nima.2026.171521
 
 ## Current — monitoring overview {#current}
 
@@ -961,6 +981,10 @@ periodic-sum coverage at 256 samples and gap 0 from about 99% to about 92%.
 Measurements and HV setpoints are unaffected, displays resume when Current stops,
 and temperature correction holds its last applied value while paused. Offline
 sum replay never pauses anything.
+
+**References** — Current-mode (integrating) detector operation.
+
+- Knoll, G. F. (2010). *Radiation Detection and Measurement*, 4th ed. Wiley. ISBN 978-0-470-13148-0
 
 ## Current — zero, scale, and units {#current-calibration}
 
@@ -1004,6 +1028,12 @@ bins do not prove that the detector, interpolation, or calibration achieves that
 resolution. Use the record schema matched to the firmware and inspect valid
 timing counts and fit diagnostics. Keep the lower boundary below the upper one.
 
+**References** — Constant-fraction timing, its digital form, and timing with plastic scintillators.
+
+- Gedcke, D. A., McDonald, W. J. (1968). Design of the constant fraction of pulse height trigger for optimum time resolution. *Nucl. Instrum. Methods* 58, 253–260. doi:10.1016/0029-554X(68)90473-4
+- Fallu-Labruyere, A., Tan, H., Hennig, W., Warburton, W. K. (2007). Time resolution studies using digital constant fraction discrimination. *Nucl. Instrum. Methods Phys. Res. A* 579, 247–251. doi:10.1016/j.nima.2007.04.048
+- Moszyński, M., Bengtson, B. (1979). Status of timing with plastic scintillation detectors. *Nucl. Instrum. Methods* 158, 1–31. doi:10.1016/S0029-554X(79)90170-8
+
 ## Coincidence — energy matrix and random sidebands {#coincidence-matrix}
 
 The matrix relates accepted CH0 and CH1 energies. Prompt shows the signal window;
@@ -1016,6 +1046,10 @@ Sideband gap separates each delayed window from the prompt gate. Choose a gap
 that avoids genuine correlated structure and check the random-background
 assumption. Linear/log scale changes display only. Export preserves matrix
 data and associated analysis information.
+
+**References** — Chance coincidences of uncorrelated events (rate 2τr₁r₂ for resolving time τ, window 2τ) and their measurement in a delayed window.
+
+- Knoll, G. F. (2010). *Radiation Detection and Measurement*, 4th ed. Wiley. ISBN 978-0-470-13148-0
 
 ## Global — per-board settings {#global}
 
@@ -1056,7 +1090,14 @@ writing either correction term; the base calibration retains its precision.
 
 Use a validated calibration and check the correction's source and diagnostics.
 Do not assume a correction fitted for one detector or gain setting applies to
-another. Hardware availability and units are shown by the supported controls.
+another. A linear coefficient approximates the drift only over a limited
+temperature range, and the board sensor can lag the detector temperature after
+an ambient change. Hardware availability and units are shown by the supported controls.
+
+**References** — Temperature dependence of scintillator light output and photodetector gain; decay-time stabilization without a temperature sensor.
+
+- Moszyński, M., Nassalski, A., Syntfeld-Każuch, A., et al. (2006). Temperature dependences of LaBr₃(Ce), LaCl₃(Ce) and NaI(Tl) scintillators. *Nucl. Instrum. Methods Phys. Res. A* 568, 739–751. doi:10.1016/j.nima.2006.06.039
+- Pausch, G., Stein, J., Teofilov, N. (2005). Stabilizing scintillation detector systems by exploiting the temperature dependence of the light pulse decay time. *IEEE Trans. Nucl. Sci.* 52, 1849–1855. doi:10.1109/TNS.2005.856616
 
 ## PSU — monitoring and availability {#psu}
 
@@ -1089,8 +1130,15 @@ temperature coefficient and Tref the reference temperature, using the control's
 displayed units. SiPM and HV compensation belong to separate supply paths.
 
 Apply coefficients measured for the actual detector and check the temperature
-source and resulting voltage. This compensates bias response, not arbitrary
+source and resulting voltage. The breakdown-voltage coefficient can differ
+between units of one type and from the datasheet value. This compensates bias response, not arbitrary
 offline spectrum drift. Observe hardware and detector voltage limits.
+
+**References** — Temperature dependence of SiPM breakdown voltage and gain, and its compensation by bias adjustment.
+
+- Otte, A. N., Garcia, D., Nguyen, T., Purushotham, D. (2017). Characterization of three high efficiency and blue sensitive silicon photomultipliers. *Nucl. Instrum. Methods Phys. Res. A* 846, 106–125. doi:10.1016/j.nima.2016.09.053
+- Licciulli, F., Marzocca, C. (2015). An active compensation system for the temperature dependence of SiPM gain. *IEEE Trans. Nucl. Sci.* 62, 228–235. doi:10.1109/TNS.2015.2388580
+- Grodzicka, M., Moszyński, M., Szczęśniak, T., et al. (2014). Performance of FBK high-density SiPMs in scintillation spectrometry. *J. Instrum.* 9, P08004. doi:10.1088/1748-0221/9/08/P08004
 
 ## External instruments — Modbus settings and telemetry {#external}
 
@@ -1117,12 +1165,19 @@ and settings-compatibility checks.
 Load a spectrum snapshot, identify reference peaks, enter known energies, and
 fit the selected calibration model. Inspect residuals and enabled calibration
 points before applying the result. Reference lines aid identification but do
-not establish peak identity by themselves.
+not establish peak identity by themselves. A quadratic model can absorb mild
+scintillator non-linearity within the calibrated range; do not extrapolate the
+calibration beyond its outermost points.
 
 Calibration maps raw channel to energy for the associated configuration
 fingerprint. Gain, shaping, or detector changes may invalidate it. Overlaying
 spectra is not permission to combine incompatible configurations. The status-bar
 energy-calibration indicator opens this workspace on double-click.
+
+**References** — Energy calibration and scintillator non-linearity.
+
+- Gilmore, G., Joss, D. (2024). *Practical Gamma-ray Spectrometry*, 3rd ed. Wiley. doi:10.1002/9781394286577
+- Kong, Y., Pausch, G., Römer, K., et al. (2010). Linearization of gamma energy spectra in scintillator-based commercial instruments. *IEEE Trans. Nucl. Sci.* 57, 1430–1434. doi:10.1109/TNS.2009.2033684
 
 ## Analysis — dose calibration logger {#dose-calibration}
 
@@ -1154,6 +1209,14 @@ background and overlapping peaks; a visually plausible fit can still be biased.
 Energy calibration determines physical energy coordinates. Reference lines are
 identification aids, not automatic proof of an isotope. Export the fit snapshot
 and diagnostics when reporting peak measurements.
+
+**References** — Peak models, Poisson fitting and decay-data sources.
+
+- Gilmore, G., Joss, D. (2024). *Practical Gamma-ray Spectrometry*, 3rd ed. Wiley. doi:10.1002/9781394286577
+- Phillips, G. W., Marlow, K. W. (1976). Automatic analysis of gamma-ray spectra from germanium detectors. *Nucl. Instrum. Methods* 137, 525–536. doi:10.1016/0029-554X(76)90472-9
+- Baker, S., Cousins, R. D. (1984). Clarification of the use of chi-square and likelihood functions in fits to histograms. *Nucl. Instrum. Methods Phys. Res.* 221, 437–442. doi:10.1016/0167-5087(84)90016-4
+- Tuli, J. K. (1996). Evaluated nuclear structure data file. *Nucl. Instrum. Methods Phys. Res. A* 369, 506–510. doi:10.1016/S0168-9002(96)80040-4
+- Trkov, A., Griffin, P. J., Simakov, S. P., et al. (2020). IRDFF-II: a new neutron metrology library. *Nucl. Data Sheets* 163, 1–108. doi:10.1016/j.nds.2019.12.001
 
 ## Analysis — PSD event readback {#psd-readback}
 
@@ -1231,7 +1294,7 @@ statistics, and do not average slice FOMs into one figure.
 
 - Grodzicka-Kobylka, M., Szczęśniak, T., Moszyński, M., et al. (2020). Fast neutron and gamma ray pulse shape discrimination in EJ-276 and EJ-276G plastic scintillators. *J. Instrum.* 15, P03030. doi:10.1088/1748-0221/15/03/P03030
 - Sénoville, M., Delaunay, F., Pârlog, M., Achouri, N. L., Orr, N. A. (2020). Neutron-γ discrimination with organic scintillators: intrinsic pulse shape and light yield contributions. *Nucl. Instrum. Methods Phys. Res. A* 971, 164080. doi:10.1016/j.nima.2020.164080
-- Graham, C., Jovanovic, I. (2024). Light output-dependent integration gating for optimized pulse-shape discrimination. *IEEE NSS/MIC/RTSD 2024*. doi:10.1109/NSS/MIC/RTSD57108.2024.10658350
+- Graham, C., Todd, E., Wilson, C., et al. (2026). Light output-dependent integration gating for optimized pulse shape discrimination. *Nucl. Instrum. Methods Phys. Res. A* 1088, 171521. doi:10.1016/j.nima.2026.171521
 
 ## Analysis — timing validation {#timing-validation}
 
@@ -1253,6 +1316,11 @@ It preserves raw quantities and available metadata; it does not calibrate energy
 calculate particle identity, or repair incomplete records. Partial or changing
 captures are rejected. ROOT conversion produces TTrees for supported event and
 waveform layouts; inspect their branches before writing an analysis macro.
+
+**References** — ROOT format and the library that writes it.
+
+- Brun, R., Rademakers, F. (1997). ROOT — an object oriented data analysis framework. *Nucl. Instrum. Methods Phys. Res. A* 389, 81–86. doi:10.1016/S0168-9002(97)00048-X
+- Pivarski, J., Schreiner, H., Hollands, A., et al. *Uproot*. Zenodo. doi:10.5281/zenodo.4340632
 
 ## Files — reports, CSV, and destinations {#export}
 
@@ -1305,6 +1373,14 @@ or connection errors; it does not silently install an update.
 
 Third-Party Licenses lists bundled dependency notices. Offline help is packaged
 with this application version and does not require an update check or network.
+
+**References** — Scientific software the application is built on.
+
+- Harris, C. R., Millman, K. J., van der Walt, S. J., et al. (2020). Array programming with NumPy. *Nature* 585, 357–362. doi:10.1038/s41586-020-2649-2
+- Virtanen, P., Gommers, R., Oliphant, T. E., et al. (2020). SciPy 1.0: fundamental algorithms for scientific computing in Python. *Nat. Methods* 17, 261–272. doi:10.1038/s41592-019-0686-2
+- Hunter, J. D. (2007). Matplotlib: a 2D graphics environment. *Comput. Sci. Eng.* 9, 90–95. doi:10.1109/MCSE.2007.55
+- Newville, M., Stensitzki, T., Allen, D. B., Ingargiola, A. (2014). LMFIT: Non-linear least-square minimization and curve-fitting for Python. Zenodo. doi:10.5281/zenodo.11813
+- Pivarski, J., Schreiner, H., Hollands, A., et al. *Uproot*. Zenodo. doi:10.5281/zenodo.4340632
 
 ## Scope periodic sums {#scope-sums}
 
@@ -1361,3 +1437,7 @@ MCA settings use GUI schema 5 and an explicit hardware block with
 parameter_abi_version=2 and parameter_units=adc_samples. Old format 3/4
 presentation settings remain readable; unidentified MCA hardware values must
 be reviewed before applying. No automatic numerical conversion is performed.
+
+**References** — Current-mode (integrating) detector operation.
+
+- Knoll, G. F. (2010). *Radiation Detection and Measurement*, 4th ed. Wiley. ISBN 978-0-470-13148-0

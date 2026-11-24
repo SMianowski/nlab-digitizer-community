@@ -1,13 +1,19 @@
 """Discrete short/long-gate optimization for waveform-derived PSD.
 
-The search maximises the fitted FOM over the gate ends directly. Zhou et al.
-(2023) instead derive the gates from gamma-ray pulses alone, Kaplan et al.
-(2023) select gates by Bayesian optimisation of a Gaussian-mixture
-discrimination score, and Graham and Jovanovic (2024) let the gates depend
-on light output.
+The search maximises the fitted FOM over the gate ends directly, as
+Sénoville et al. (2020) did when adjusting their total and slow gates. Zhou
+et al. (2023) instead set the tail-gate start from a gamma-ray (Cs-137) pulse
+template alone; Kaplan et al. (2023) rank gates with a Gaussian-mixture
+separation score and tune that selection by Bayesian optimisation; and
+Graham et al. (2026) search the gate grid separately in each light-output
+bin.
 
 References
 ----------
+Sénoville, M., Delaunay, F., Pârlog, M., Achouri, N. L., Orr, N. A.
+    (2020). Neutron-gamma discrimination with organic scintillators:
+    intrinsic pulse shape and light yield contributions. Nucl. Instrum.
+    Methods Phys. Res. A 971, 164080. doi:10.1016/j.nima.2020.164080
 Zhou, J., Abdulaziz, A., Altmann, Y., Di Fulvio, A. (2023). Generalized
     method for the optimization of pulse shape discrimination parameters.
     Nucl. Instrum. Methods Phys. Res. A 1050, 168184.
@@ -16,9 +22,10 @@ Kaplan, A. D., Blair, B., Glenn, A., Wurtz, R. (2023). Automated
     integration gate selection for Gaussian mixture model pulse shape
     discrimination. Nucl. Instrum. Methods Phys. Res. A 1055, 168486.
     doi:10.1016/j.nima.2023.168486
-Graham, C., Jovanovic, I. (2024). Light output-dependent integration
-    gating for optimized pulse-shape discrimination. IEEE NSS/MIC/RTSD 2024.
-    doi:10.1109/NSS/MIC/RTSD57108.2024.10658350
+Graham, C., Todd, E., Wilson, C., et al. (2026). Light output-dependent
+    integration gating for optimized pulse shape discrimination. Nucl.
+    Instrum. Methods Phys. Res. A 1088, 171521.
+    doi:10.1016/j.nima.2026.171521
 """
 
 from __future__ import annotations

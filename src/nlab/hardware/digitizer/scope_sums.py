@@ -2,6 +2,14 @@
 
 Contract: PetaLinux bb8c57e, scope-periodic-sum-v123.md. Sums contain all N
 original offset-binary ADC samples. They cannot recover waveforms or extrema.
+
+Window sums measure the detector signal in current (integrating) mode rather
+than by counting pulses (Knoll 2010).
+
+References
+----------
+Knoll, G. F. (2010). Radiation Detection and Measurement, 4th ed.
+    Wiley, Hoboken NJ. ISBN 978-0-470-13148-0
 """
 
 from __future__ import annotations

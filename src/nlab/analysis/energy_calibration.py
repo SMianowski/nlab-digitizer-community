@@ -1,4 +1,19 @@
-"""Energy-scale fitting and serialisation for MCA histogram channels."""
+"""Energy-scale fitting and serialisation for MCA histogram channels.
+
+Channel-to-energy calibration from identified photopeaks with a linear or
+quadratic function follows standard gamma-ray spectrometry practice (Gilmore
+and Joss 2024). Scintillation detectors have a non-linear energy scale (Kong
+et al. 2010); the quadratic model can absorb mild curvature within the
+calibrated range.
+
+References
+----------
+Gilmore, G., Joss, D. (2024). Practical Gamma-ray Spectrometry, 3rd ed.
+    Wiley. doi:10.1002/9781394286577
+Kong, Y., Pausch, G., Römer, K., et al. (2010). Linearization of gamma
+    energy spectra in scintillator-based commercial instruments. IEEE Trans.
+    Nucl. Sci. 57, 1430-1434. doi:10.1109/TNS.2009.2033684
+"""
 
 from __future__ import annotations
 

@@ -2,6 +2,33 @@
 
 Sample fields are original ADC positions (2 ns each), not encoded registers.
 This module validates requests; it does not infer detector calibration.
+
+The blocks whose domains are listed here belong to standard digital
+pulse-processing families: trapezoidal shaping (Jordanov and Knoll 1994;
+Jordanov et al. 1994), recursive CR-(RC)^n shaping (Nakhostin 2011) and
+constant-fraction timing (Gedcke and McDonald 1968; digital form in
+Fallu-Labruyere et al. 2007). The PetaLinux driver and firmware remain the
+authority on their exact implementation.
+
+References
+----------
+Jordanov, V. T., Knoll, G. F. (1994). Digital synthesis of pulse shapes in
+    real time for high resolution radiation spectroscopy. Nucl. Instrum.
+    Methods Phys. Res. A 345, 337-345. doi:10.1016/0168-9002(94)91011-1
+Jordanov, V. T., Knoll, G. F., Huber, A. C., Pantazis, J. A. (1994).
+    Digital techniques for real-time pulse shaping in radiation measurements.
+    Nucl. Instrum. Methods Phys. Res. A 353, 261-264.
+    doi:10.1016/0168-9002(94)91652-7
+Nakhostin, M. (2011). Recursive algorithms for real-time digital
+    CR-(RC)^n pulse shaping. IEEE Trans. Nucl. Sci. 58, 2378-2381.
+    doi:10.1109/TNS.2011.2164556
+Gedcke, D. A., McDonald, W. J. (1968). Design of the constant fraction of
+    pulse height trigger for optimum time resolution. Nucl. Instrum. Methods
+    58, 253-260. doi:10.1016/0029-554X(68)90473-4
+Fallu-Labruyere, A., Tan, H., Hennig, W., Warburton, W. K. (2007). Time
+    resolution studies using digital constant fraction discrimination.
+    Nucl. Instrum. Methods Phys. Res. A 579, 247-251.
+    doi:10.1016/j.nima.2007.04.048
 """
 
 from __future__ import annotations
